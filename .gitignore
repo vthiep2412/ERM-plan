@@ -73,7 +73,7 @@ docs/_build/
 
 # PyBuilder
 .pybuilder/
-# target/
+target/
 
 # Jupyter Notebook
 .ipynb_checkpoints
@@ -205,5 +205,3 @@ cython_debug/
 marimo/_static/
 marimo/_lsp/
 __marimo__/
-
-MyDesk_Broker_Deploy/
