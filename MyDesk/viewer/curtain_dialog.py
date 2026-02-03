@@ -3,11 +3,10 @@ Privacy Curtain Dialog for MyDesk Viewer
 Allows user to obscure the remote screen with black or custom image.
 """
 import os
-import json
 import shutil
 from PyQt6.QtWidgets import (QDialog, QVBoxLayout, QHBoxLayout, QLabel, 
                              QPushButton, QListWidget, QListWidgetItem,
-                             QFileDialog, QWidget)
+                             QFileDialog)
 from PyQt6.QtGui import QPixmap, QIcon
 from PyQt6.QtCore import Qt, pyqtSignal, QSize
 

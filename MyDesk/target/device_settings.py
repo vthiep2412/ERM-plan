@@ -1,0 +1,310 @@
+"""
+Device Settings Handler - Control WiFi, volume, brightness, time, power
+"""
+import subprocess
+import ctypes
+import json
+import platform
+from datetime import datetime
+
+try:
+    import psutil
+except ImportError:
+    psutil = None
+
+
+class DeviceSettings:
+    """Handles device settings control on Windows."""
+    
+    def __init__(self):
+        pass
+    
+    # =========================================================================
+    # Network
+    # =========================================================================
+    
+    def set_wifi(self, enabled):
+        """Enable or disable WiFi adapter."""
+        action = "enable" if enabled else "disable"
+        try:
+            # Try common WiFi interface names
+            for name in ["Wi-Fi", "WiFi", "Wireless Network Connection"]:
+                result = subprocess.run(
+                    ["netsh", "interface", "set", "interface", name, action],
+                    capture_output=True, text=True,
+                    creationflags=subprocess.CREATE_NO_WINDOW
+                )
+                if result.returncode == 0:
+                    print(f"[+] WiFi {action}d")
+                    return True
+            print("[-] WiFi interface not found")
+            return False
+        except Exception as e:
+            print(f"[-] WiFi Error: {e}")
+            return False
+    
+    def set_ethernet(self, enabled):
+        """Enable or disable Ethernet adapter."""
+        action = "enable" if enabled else "disable"
+        try:
+            for name in ["Ethernet", "Local Area Connection"]:
+                result = subprocess.run(
+                    ["netsh", "interface", "set", "interface", name, action],
+                    capture_output=True, text=True,
+                    creationflags=subprocess.CREATE_NO_WINDOW
+                )
+                if result.returncode == 0:
+                    print(f"[+] Ethernet {action}d")
+                    return True
+            print("[-] Ethernet interface not found")
+            return False
+        except Exception as e:
+            print(f"[-] Ethernet Error: {e}")
+            return False
+    
+    # =========================================================================
+    # Audio
+    # =========================================================================
+    
+    def set_volume(self, level):
+        """Set system volume (0-100).
+        
+        Uses nircmd if available, otherwise attempts PowerShell.
+        """
+        level = max(0, min(100, level))
+        try:
+            # Method 1: nircmd (if installed)
+            result = subprocess.run(
+                ["nircmd", "setsysvolume", str(int(level * 655.35))],
+                capture_output=True,
+                creationflags=subprocess.CREATE_NO_WINDOW
+            )
+            if result.returncode == 0:
+                return True
+        except FileNotFoundError:
+            pass
+        
+        # Method 2: PowerShell with AudioDeviceCmdlets or direct COM
+        try:
+            ps_script = f'''
+            Add-Type -TypeDefinition @"
+            using System.Runtime.InteropServices;
+            [Guid("5CDF2C82-841E-4546-9722-0CF74078229A"), InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
+            interface IAudioEndpointVolume {{
+                int f(); int g(); int h(); int i();
+                int SetMasterVolumeLevelScalar(float fLevel, System.Guid pguidEventContext);
+                int j();
+                int GetMasterVolumeLevelScalar(out float pfLevel);
+                int k(); int l(); int m(); int n();
+                int SetMute([MarshalAs(UnmanagedType.Bool)] bool bMute, System.Guid pguidEventContext);
+                int GetMute(out bool pbMute);
+            }}
+            [Guid("D666063F-1587-4E43-81F1-B948E807363F"), InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
+            interface IMMDevice {{ int Activate(ref System.Guid id, int clsCtx, int ActivParams, out IAudioEndpointVolume aev); }}
+            [Guid("A95664D2-9614-4F35-A746-DE8DB63617E6"), InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
+            interface IMMDeviceEnumerator {{ int GetDefaultAudioEndpoint(int dataFlow, int role, out IMMDevice ppDevice); }}
+            [ComImport, Guid("BCDE0395-E52F-467C-8E3D-C4579291692E")] class MMDeviceEnumeratorComObject {{ }}
+            public class Audio {{
+                static IAudioEndpointVolume Vol() {{
+                    var enumerator = new MMDeviceEnumeratorComObject() as IMMDeviceEnumerator;
+                    IMMDevice dev = null;
+                    enumerator.GetDefaultAudioEndpoint(0, 1, out dev);
+                    var volId = typeof(IAudioEndpointVolume).GUID;
+                    IAudioEndpointVolume epv = null;
+                    dev.Activate(ref volId, 23, 0, out epv);
+                    return epv;
+                }}
+                public static void SetVolume(float v) {{ Vol().SetMasterVolumeLevelScalar(v, System.Guid.Empty); }}
+            }}
+"@
+            [Audio]::SetVolume({level / 100.0})
+            '''
+            subprocess.run(
+                ["powershell", "-Command", ps_script],
+                capture_output=True,
+                creationflags=subprocess.CREATE_NO_WINDOW
+            )
+            return True
+        except Exception as e:
+            print(f"[-] Volume Error: {e}")
+            return False
+    
+    def set_mute(self, muted):
+        """Mute or unmute system audio."""
+        try:
+            action = "1" if muted else "0"
+            subprocess.run(
+                ["nircmd", "mutesysvolume", action],
+                capture_output=True,
+                creationflags=subprocess.CREATE_NO_WINDOW
+            )
+            return True
+        except FileNotFoundError:
+            print("[-] nircmd not found for mute control")
+            return False
+    
+    # =========================================================================
+    # Display
+    # =========================================================================
+    
+    def set_brightness(self, level):
+        """Set screen brightness (0-100)."""
+        level = max(0, min(100, level))
+        try:
+            # Use WMI via PowerShell
+            ps_cmd = f'(Get-WmiObject -Namespace root/WMI -Class WmiMonitorBrightnessMethods).WmiSetBrightness(1,{level})'
+            subprocess.run(
+                ["powershell", "-Command", ps_cmd],
+                capture_output=True,
+                creationflags=subprocess.CREATE_NO_WINDOW
+            )
+            return True
+        except Exception as e:
+            print(f"[-] Brightness Error: {e}")
+            return False
+    
+    # =========================================================================
+    # Date & Time
+    # =========================================================================
+    
+    def set_time(self, iso_datetime):
+        """Set system time from ISO8601 string."""
+        try:
+            dt = datetime.fromisoformat(iso_datetime.replace('Z', '+00:00'))
+            date_str = dt.strftime('%m-%d-%Y')
+            time_str = dt.strftime('%H:%M:%S')
+            
+            # Set date
+            subprocess.run(
+                ["cmd", "/c", f"date {date_str}"],
+                capture_output=True,
+                creationflags=subprocess.CREATE_NO_WINDOW
+            )
+            # Set time
+            subprocess.run(
+                ["cmd", "/c", f"time {time_str}"],
+                capture_output=True,
+                creationflags=subprocess.CREATE_NO_WINDOW
+            )
+            return True
+        except Exception as e:
+            print(f"[-] Set Time Error: {e}")
+            return False
+    
+    def sync_time(self):
+        """Sync time with NTP server."""
+        try:
+            subprocess.run(
+                ["w32tm", "/resync", "/nowait"],
+                capture_output=True,
+                creationflags=subprocess.CREATE_NO_WINDOW
+            )
+            return True
+        except Exception as e:
+            print(f"[-] Sync Time Error: {e}")
+            return False
+    
+    # =========================================================================
+    # Power
+    # =========================================================================
+    
+    def power_action(self, action):
+        """Execute power action.
+        
+        Args:
+            action: sleep|restart|shutdown|lock|logoff
+        """
+        try:
+            if action == "sleep":
+                # Requires SetSuspendState
+                ctypes.windll.powrprof.SetSuspendState(0, 1, 0)
+            elif action == "restart":
+                subprocess.run(["shutdown", "/r", "/t", "0"], creationflags=subprocess.CREATE_NO_WINDOW)
+            elif action == "shutdown":
+                subprocess.run(["shutdown", "/s", "/t", "0"], creationflags=subprocess.CREATE_NO_WINDOW)
+            elif action == "lock":
+                ctypes.windll.user32.LockWorkStation()
+            elif action == "logoff":
+                subprocess.run(["shutdown", "/l"], creationflags=subprocess.CREATE_NO_WINDOW)
+            else:
+                print(f"[-] Unknown power action: {action}")
+                return False
+            return True
+        except Exception as e:
+            print(f"[-] Power Action Error: {e}")
+            return False
+    
+    # =========================================================================
+    # System Info
+    # =========================================================================
+    
+    def get_sysinfo(self):
+        """Get system information.
+        
+        Returns:
+            dict with os, cpu, ram, disk, battery, wifi_available, uptime
+        """
+        info = {}
+        
+        # OS
+        info['os'] = f"{platform.system()} {platform.release()} ({platform.version()})"
+        
+        # CPU
+        # Try to get detailed CPU name via wmic
+        try:
+            cpu_name = subprocess.check_output(["wmic", "cpu", "get", "name"], creationflags=subprocess.CREATE_NO_WINDOW).decode().split('\n')[1].strip()
+        except:
+            cpu_name = platform.processor()
+            
+        info['cpu'] = cpu_name
+        if psutil:
+            # interval=0.1 avoids blocking too long but gives instant reading (better than 0.0)
+            info['cpu'] += f" ({psutil.cpu_percent(interval=0.1)}%)"
+        
+        # RAM
+        if psutil:
+            mem = psutil.virtual_memory()
+            info['ram'] = f"{mem.used / (1024**3):.1f} GB / {mem.total / (1024**3):.1f} GB ({mem.percent}%)"
+        
+        # Disk
+        if psutil:
+            disk = psutil.disk_usage('/')
+            info['disk'] = f"{disk.used / (1024**3):.1f} GB / {disk.total / (1024**3):.1f} GB ({disk.percent}%)"
+        
+        # Battery
+        if psutil:
+            battery = psutil.sensors_battery()
+            if battery:
+                status = "Charging" if battery.power_plugged else "Discharging"
+                info['battery'] = f"{battery.percent}% ({status})"
+            else:
+                info['battery'] = "No battery"
+        
+        # Uptime
+        if psutil:
+            boot_time = datetime.fromtimestamp(psutil.boot_time())
+            uptime = datetime.now() - boot_time
+            hours, remainder = divmod(int(uptime.total_seconds()), 3600)
+            minutes, seconds = divmod(remainder, 60)
+            info['uptime'] = f"{hours}h {minutes}m {seconds}s"
+        
+        # WiFi available
+        info['wifi_available'] = self._check_wifi_available()
+        
+        return info
+    
+    def _check_wifi_available(self):
+        """Check if WiFi adapter exists."""
+        try:
+            result = subprocess.run(
+                ["netsh", "wlan", "show", "interfaces"],
+                capture_output=True, text=True,
+                creationflags=subprocess.CREATE_NO_WINDOW
+            )
+            return "State" in result.stdout
+        except Exception:
+            return False
+    
+    def to_json(self, info):
+        """Convert sysinfo to JSON bytes."""
+        return json.dumps(info).encode('utf-8')

@@ -19,6 +19,20 @@ class AsyncSessionWorker(QObject):
     connection_progress = pyqtSignal(int, str)  # step (0-3), hint message
     connection_ready = pyqtSignal()  # emitted when handshake complete
     device_error = pyqtSignal(str, str)  # device type (CAM/MIC), error message
+    
+    # New tab signals
+    shell_output = pyqtSignal(str)
+    shell_exit = pyqtSignal(int)
+    shell_cwd = pyqtSignal(str) # New Signal for CWD
+    pm_data = pyqtSignal(list)  # Process list
+    
+    # ... (skipping unchanged signals) ...
+
+
+    fm_data = pyqtSignal(list, str)  # Files, path
+    fm_chunk = pyqtSignal(bytes)  # File download chunk
+    clipboard_data = pyqtSignal(str)
+    sysinfo_data = pyqtSignal(dict)
 
     def __init__(self, target_url, target_id=None):
         super().__init__()
@@ -67,6 +81,12 @@ class AsyncSessionWorker(QObject):
 
     async def _connect_and_stream(self):
         try:
+            # FIX: Downgrade WSS to WS for localhost to avoid handshake errors
+            if "localhost" in self.target_url or "127.0.0.1" in self.target_url:
+                if self.target_url.startswith("wss://"):
+                    self.target_url = self.target_url.replace("wss://", "ws://")
+                    print(f"[*] Downgraded to ws:// for localhost: {self.target_url}")
+
             # Step 0: Connecting to broker
             self.connection_progress.emit(0, "Establishing WebSocket connection...")
             print(f"[*] Viewer connecting to {self.target_url}")
@@ -176,6 +196,59 @@ class AsyncSessionWorker(QObject):
                     self.log_received.emit(payload.decode('utf-8'))
                 except UnicodeDecodeError:
                     pass
+            
+            # Shell responses
+            elif opcode == protocol.OP_SHELL_OUTPUT:
+                try:
+                    self.shell_output.emit(payload.decode('utf-8'))
+                except UnicodeDecodeError:
+                    pass
+            elif opcode == protocol.OP_SHELL_EXIT:
+                if len(payload) >= 4:
+                    import struct
+                    code = struct.unpack('<i', payload[:4])[0]
+                    self.shell_exit.emit(code)
+            elif opcode == protocol.OP_SHELL_CWD:
+                try:
+                    self.shell_cwd.emit(payload.decode('utf-8'))
+                except UnicodeDecodeError:
+                    pass
+            
+            # Process Manager responses
+            elif opcode == protocol.OP_PM_DATA:
+                try:
+                    data = json.loads(payload.decode('utf-8'))
+                    self.pm_data.emit(data)
+                except Exception:
+                    pass
+            
+            # File Manager responses
+            elif opcode == protocol.OP_FM_DATA:
+                try:
+                    data = json.loads(payload.decode('utf-8'))
+                    files = data.get('files', [])
+                    path = data.get('path', '')
+                    self.fm_data.emit(files, path)
+                except Exception:
+                    pass
+            elif opcode == protocol.OP_FM_CHUNK:
+                self.fm_chunk.emit(payload)
+            
+            # Clipboard responses
+            elif opcode == protocol.OP_CLIP_DATA:
+                try:
+                    self.clipboard_data.emit(payload.decode('utf-8'))
+                except UnicodeDecodeError:
+                    pass
+            
+            # Settings responses
+            elif opcode == protocol.OP_SYSINFO_DATA:
+                try:
+                    data = json.loads(payload.decode('utf-8'))
+                    self.sysinfo_data.emit(data)
+                except Exception:
+                    pass
+            
             elif opcode == protocol.OP_ERROR:
                 try:
                     error_msg = payload.decode('utf-8')

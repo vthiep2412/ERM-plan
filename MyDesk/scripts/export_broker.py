@@ -18,7 +18,7 @@ def main():
     if os.path.exists(DEST_DIR):
         # Optional: Ask for confirmation? Or just be safe it's the right folder name.
         if "MyDesk_Broker_Deploy" not in DEST_DIR:
-             print(f"[-] Precautionary Abort: Target folder name mismatch.")
+             print("[-] Precautionary Abort: Target folder name mismatch.")
              return
         shutil.rmtree(DEST_DIR)
     os.makedirs(DEST_DIR)

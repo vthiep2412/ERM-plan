@@ -2,10 +2,9 @@
 Connection Progress Dialog for MyDesk Viewer
 Shows handshake progress and blocks interaction until connected.
 """
-from PyQt6.QtWidgets import (QDialog, QVBoxLayout, QLabel, QProgressBar, 
-                             QApplication)
+from PyQt6.QtWidgets import QDialog, QVBoxLayout, QLabel, QProgressBar
 from PyQt6.QtCore import Qt, pyqtSignal, QTimer
-from PyQt6.QtGui import QFont, QMovie
+from PyQt6.QtGui import QFont
 
 class ConnectionDialog(QDialog):
     """Modal dialog showing connection progress"""

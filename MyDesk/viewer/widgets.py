@@ -1,6 +1,6 @@
-from PyQt6.QtWidgets import QWidget, QLabel, QVBoxLayout, QPlainTextEdit, QFrame
-from PyQt6.QtCore import Qt, pyqtSignal, QEvent
-from PyQt6.QtGui import QPixmap, QImage
+from PyQt6.QtWidgets import QLabel, QVBoxLayout, QPlainTextEdit, QFrame
+from PyQt6.QtCore import Qt, pyqtSignal
+from PyQt6.QtGui import QPixmap
 
 # Import delta decoder
 try:

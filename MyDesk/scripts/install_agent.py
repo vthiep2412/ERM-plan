@@ -49,7 +49,7 @@ def install_exe(broker_url, webhook_url):
             print(f"[-] Extraction Failed: {e}")
             return
     else:
-        print(f"[-] Bundled Agent not found. Ensure you compiled with --add-binary")
+        print("[-] Bundled Agent not found. Ensure you compiled with --add-binary")
         return
 
     # Write JSON Config

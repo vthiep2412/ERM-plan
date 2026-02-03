@@ -2,10 +2,10 @@ import sys
 import os
 import json
 import datetime
-from PyQt6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, 
+from PyQt6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, 
                              QPushButton, QLineEdit, QLabel, QMessageBox, QComboBox, QFrame, 
-                             QListWidget, QListWidgetItem, QAbstractItemView, QGridLayout)
-from PyQt6.QtGui import QFont, QIcon, QColor, QPalette
+                             QListWidget, QListWidgetItem, QAbstractItemView)
+from PyQt6.QtGui import QColor
 from PyQt6.QtCore import Qt
 
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))

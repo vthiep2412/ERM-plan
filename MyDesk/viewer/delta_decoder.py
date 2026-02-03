@@ -3,9 +3,7 @@ Delta Frame Decoder for MyDesk Viewer
 Reconstructs frames from delta updates.
 """
 import struct
-import io
 from PyQt6.QtGui import QImage, QPixmap, QPainter
-from PyQt6.QtCore import QBuffer, QIODevice
 
 import time
 

