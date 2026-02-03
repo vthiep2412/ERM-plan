@@ -60,5 +60,6 @@ class AudioStreamer:
             try:
                 self.stop()
                 self.start()
-            except: pass
+            except Exception as restart_err: 
+                print(f"[-] Mic Restart Error: {restart_err}")
             return None

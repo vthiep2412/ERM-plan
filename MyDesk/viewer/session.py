@@ -1,6 +1,8 @@
 import sys
 import os
 import json
+import time
+import struct
 from PyQt6.QtWidgets import (QMainWindow, QToolBar, QMessageBox, QWidget, 
                              QVBoxLayout, QHBoxLayout, QTextEdit, QPushButton,
                              QLabel, QFrame, QToolButton)
@@ -28,7 +30,7 @@ class SessionWindow(QMainWindow):
         
         self.capture_settings = self.load_settings()
         self.curtain_active = False
-        self.input_mode = "indirect"  # "direct" or "indirect"
+        self.input_mode = "direct"  # "direct" or "indirect"
         self.closing = False
         self.mouse_enabled = True
         
@@ -213,8 +215,6 @@ class SessionWindow(QMainWindow):
         controls_row.addStretch()
         panel_layout.addLayout(controls_row)
         
-        panel_layout.addLayout(controls_row)
-        
         # Input Buffer Row (Visible only in Indirect Mode)
         self.buffer_frame = QFrame()
         buffer_layout = QHBoxLayout(self.buffer_frame)
@@ -270,14 +270,12 @@ class SessionWindow(QMainWindow):
         
         if event_type == 'move' and self.mouse_enabled:
             # Throttle mouse moves (max 20/sec)
-            import time
             now = time.time() * 1000
             if now - self._last_mouse_time < self._mouse_throttle_ms:
                 return
             self._last_mouse_time = now
             
             x, y = event[1], event[2]
-            import struct
             payload = struct.pack('!ff', x, y)
             self.send_command(protocol.OP_MOUSE_MOVE, payload)
             
@@ -300,8 +298,16 @@ class SessionWindow(QMainWindow):
 
         elif event_type == 'scroll':
             dx, dy = event[1], event[2]
-            import struct
-            payload = struct.pack('!bb', dx, dy)
+            # Clamp to int16
+            # Debug assertion/logging for protocol overflow
+            if not (-100 <= dx <= 100) or not (-100 <= dy <= 100):
+                # We expect small step counts here (e.g. +/- 20). Large values indicate an issue.
+                print(f"[!] Warning: Large Scroll Delta Detected: dx={dx}, dy={dy}")
+
+            # Clamp to int16 (Protocol Saftey)
+            dx = max(-32768, min(32767, dx))
+            dy = max(-32768, min(32767, dy))
+            payload = struct.pack('!hh', dx, dy)
             self.send_command(protocol.OP_SCROLL, payload)
             
     def toggle_keylog(self, checked):

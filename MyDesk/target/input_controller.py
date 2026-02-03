@@ -205,12 +205,13 @@ def parse_key_press(payload):
     return None, None
 
 def parse_scroll(payload):
-    """Parse scroll payload: dx, dy (2 signed bytes)"""
-    if len(payload) >= 2:
-        dx = struct.unpack('!b', payload[0:1])[0]
-        dy = struct.unpack('!b', payload[1:2])[0]
-        return dx, dy
-    return 0, 0
+    """Parse scroll payload: dx, dy (2 signed shorts). 
+    Payload must be exactly 4 bytes.
+    """
+    if len(payload) != 4:
+        return 0, 0
+    dx, dy = struct.unpack('!hh', payload)
+    return dx, dy
 
 
 # ============================================================================
@@ -253,22 +254,17 @@ KEYEVENTF_KEYUP = 0x0002
 KEYEVENTF_SCANCODE = 0x0008
 KEYEVENTF_UNICODE = 0x0004
 
-# Scan Code Mapping (QWERTY)
-# Maps Qt Key codes/Chars to MapVirtualKey scan codes
-# Partial map for common keys
-SCAN_CODES = {
-    'w': 0x11, 'a': 0x1E, 's': 0x1F, 'd': 0x20,
-    'up': 0x48, 'left': 0x4B, 'down': 0x50, 'right': 0x4D,
-    'space': 0x39, 'enter': 0x1C, 'esc': 0x01,
-    'shift': 0x2A, 'ctrl': 0x1D, 'alt': 0x38,
-    'backspace': 0x0E, 'tab': 0x0F,
-}
+# Scan Code Mapping (REMOVED: Using MapVirtualKeyW instead)
 
 def press_key_direct(hexKeyCode, pressed):
     """
     Uses SendInput with ScanCodes for DirectX compatibility.
     hexKeyCode: Virtual Key Code (VK)
     """
+    # Platform Guard
+    if not (hasattr(ctypes, "windll") and hasattr(ctypes.windll, "user32")):
+        return False
+
     extra = ctypes.c_ulong(0)
     ii_ = Input_I()
     
@@ -279,9 +275,20 @@ def press_key_direct(hexKeyCode, pressed):
     
     # We use Virtual Key codes (VK) -> Scan Code conversion by Windows
     # to avoid manual mapping hell
-    scan_code = ctypes.windll.user32.MapVirtualKeyW(hexKeyCode, 0)
+    # MAPVK_VK_TO_VSC_EX (4) handles extended keys better (numpad, arrows)
+    scan_code = ctypes.windll.user32.MapVirtualKeyW(hexKeyCode, 4)
+    
+    # Error Check for MapVirtualKeyW
+    if scan_code == 0:
+        # Some keys (like PrtSc) might fail or need special handling, but unexpected failures should be logged
+        print(f"[-] MapVirtualKeyW failed for VK: 0x{hexKeyCode:02X}")
+        # We can try to proceed if it's a known key that doesn't strictly need mapping (rare), 
+        # or just abort. Aborting is safer to avoid sending garbage.
+        return False
     
     # If MapVirtualKey fails or it's a special extended key (arrows)
+    # 0x25=Left, 0x26=Up, 0x27=Right, 0x28=Down
+    # 0x2D=Ins, 0x2E=Del, 0x21=PgUp, 0x22=PgDn, 0x23=End, 0x24=Home
     if hexKeyCode in [0x25, 0x26, 0x27, 0x28, 0x2D, 0x2E, 0x21, 0x22, 0x23, 0x24]: 
         flags |= KEYEVENTF_EXTENDEDKEY
 
@@ -290,7 +297,14 @@ def press_key_direct(hexKeyCode, pressed):
 
     ii_.ki = KeyBdInput(0, scan_code, flags, 0, ctypes.pointer(extra))
     x = Input(INPUT_KEYBOARD, ii_)
-    ctypes.windll.user32.SendInput(1, ctypes.pointer(x), ctypes.sizeof(x))
+    
+    result = ctypes.windll.user32.SendInput(1, ctypes.pointer(x), ctypes.sizeof(x))
+    if result == 0:
+        error_code = ctypes.windll.kernel32.GetLastError()
+        print(f"[-] SendInput Failed! Error Code: {error_code}, VK: 0x{hexKeyCode:02X}, Scan: 0x{scan_code:02X}")
+        return False
+    
+    return True
 
 # Monkey Patch InputController to use Direct Input if on Windows
 if HAS_PYNPUT and hasattr(ctypes, 'windll'):
@@ -315,11 +329,30 @@ if HAS_PYNPUT and hasattr(ctypes, 'windll'):
             16777248: 0x10, # Shift
             16777249: 0x11, # Ctrl
             16777251: 0x12, # Alt
+            16777252: 0x14, # Caps Lock
             16777235: 0x26, # Up
             16777237: 0x28, # Down
             16777234: 0x25, # Left
             16777236: 0x27, # Right
+            16777222: 0x2D, # Insert
             16777223: 0x2E, # Delete
+            16777232: 0x24, # Home
+            16777233: 0x23, # End
+            16777238: 0x21, # Page Up
+            16777239: 0x22, # Page Down
+            16777264: 0x70, # F1
+            16777265: 0x71, # F2
+            16777266: 0x72, # F3
+            16777267: 0x73, # F4
+            16777268: 0x74, # F5
+            16777269: 0x75, # F6
+            16777270: 0x76, # F7
+            16777271: 0x77, # F8
+            16777272: 0x78, # F9
+            16777273: 0x79, # F10
+            16777274: 0x7A, # F11
+            16777275: 0x7B, # F12
+            16777299: 0x5B, # Win / Meta (Left Win)
         }
         return qt_vk_map.get(key_code, 0)
 
@@ -330,11 +363,12 @@ if HAS_PYNPUT and hasattr(ctypes, 'windll'):
         vk = qt_to_vk(key_code)
         if vk > 0:
             try:
-                press_key_direct(vk, pressed)
+                if press_key_direct(vk, pressed):
+                    return
             except Exception as e:
-                print(f"[-] DirectInput Error: {e}")
-        else:
-            # Fallback to pynput
-            original_press(self, key_code, pressed)
+                print(f"[-] DirectInput Error: {e}, falling back to pynput")
+        
+        # Fallback to pynput if vk=0 or DirectInput failed/returned False
+        original_press(self, key_code, pressed)
             
     InputController.press_key = press_key_enhanced

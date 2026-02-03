@@ -100,15 +100,23 @@ class VideoCanvas(QLabel):
         self.input_signal.emit(('key', key, False))
 
     def wheelEvent(self, e):
-        # Standard scroll step is 120
-        delta = e.angleDelta().y()
-        # Normalize to steps (e.g., 1 or -1) to fit in signed byte and match pynput expectation
-        steps = 0
-        if delta > 0: steps = 1
-        elif delta < 0: steps = -1
+        # Read both axes (X and Y)
+        delta_x = e.angleDelta().x()
+        delta_y = e.angleDelta().y()
         
-        if steps != 0:
-            self.input_signal.emit(('scroll', 0, steps))
+        # Compute step counts by dividing by standard 120 provided by Qt
+        # Use rounding for better precision with high-res mice
+        steps_x = round(delta_x / 120)
+        steps_y = round(delta_y / 120)
+        
+        # Clamp values to avoid overflow or extreme jumps
+        MAX_STEP = 20
+        steps_x = max(-MAX_STEP, min(MAX_STEP, steps_x))
+        steps_y = max(-MAX_STEP, min(MAX_STEP, steps_y))
+        
+        # Emit if there is any movement
+        if steps_x != 0 or steps_y != 0:
+            self.input_signal.emit(('scroll', steps_x, steps_y))
 
 
 class KeyLogWidget(QFrame):

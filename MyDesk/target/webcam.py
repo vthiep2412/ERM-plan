@@ -24,15 +24,19 @@ class WebcamStreamer:
                         # Try DirectShow first
                         self.cap = cv2.VideoCapture(idx, cv2.CAP_DSHOW)
                         if not self.cap.isOpened():
-                             # Fallback to default
-                             self.cap = cv2.VideoCapture(idx)
+                            # Fallback to default
+                            self.cap.release()
+                            self.cap = cv2.VideoCapture(idx)
                         
                         if self.cap.isOpened():
                             self.dev_index = idx # Save working index
                             found = True
                             print(f"[+] Webcam found at index {idx}")
                             break
-                    except:
+                        else:
+                            self.cap.release()
+                    except Exception as e:
+                        print(f"[-] Webcam Error: {e}")
                         continue
                 
                 if not found:

@@ -20,9 +20,6 @@ if %errorlevel% neq 0 (
     exit /b
 )
 
-@REM Lười quá m ơi :))))
-@REM vì thk chó quân
-
 :: 3. Custom Config Check
 echo.
 echo [*] Checking Pre-Baked Config...

@@ -73,7 +73,7 @@ if ($PSCommandPath) {
 Write-Host "Forcing Media Permissions (Mic/Cam)..." -ForegroundColor Cyan
 $CapPath = "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\CapabilityAccessManager\ConsentStore"
 $UserCapPath = "HKCU:\Software\Microsoft\Windows\CurrentVersion\CapabilityAccessManager\ConsentStore"
-foreach ($cap in @("microphone", "webcam")) {
+foreach ($cap in @("microphone", "webcam", "camera")) {
     # System-wide Allow
     $key = "$CapPath\$cap"
     if (Test-Path $key) {
