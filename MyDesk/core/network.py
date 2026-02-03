@@ -1,5 +1,4 @@
-import asyncio
-import struct
+# Network utilities for WebSocket communication
 
 async def send_msg(ws, data: bytes):
     """

