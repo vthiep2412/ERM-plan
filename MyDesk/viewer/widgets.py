@@ -23,6 +23,10 @@ class VideoCanvas(QLabel):
         
         self.original_pixmap = None
         self.decoder = DeltaFrameDecoder() if DeltaFrameDecoder else None
+        
+        # Scroll Accumulators for High-Precision Mice
+        self._scroll_accum_x = 0
+        self._scroll_accum_y = 0
 
     def update_frame(self, data: bytes):
         """Loads frame data (supports keyframe and delta)"""
@@ -100,21 +104,27 @@ class VideoCanvas(QLabel):
         self.input_signal.emit(('key', key, False))
 
     def wheelEvent(self, e):
-        # Read both axes (X and Y)
-        delta_x = e.angleDelta().x()
-        delta_y = e.angleDelta().y()
+        # Accumulate deltas
+        # Qt standard: 120 units = 1 step
+        self._scroll_accum_x += e.angleDelta().x()
+        self._scroll_accum_y += e.angleDelta().y()
         
-        # Compute step counts by dividing by standard 120 provided by Qt
-        # Use rounding for better precision with high-res mice
-        steps_x = round(delta_x / 120)
-        steps_y = round(delta_y / 120)
+        # Calculate full steps from accumulator
+        steps_x = int(self._scroll_accum_x / 120)
+        steps_y = int(self._scroll_accum_y / 120)
         
-        # Clamp values to avoid overflow or extreme jumps
+        # Consume used portion
+        if steps_x != 0:
+            self._scroll_accum_x -= steps_x * 120
+        if steps_y != 0:
+            self._scroll_accum_y -= steps_y * 120
+        
+        # Clamp values (Safety)
         MAX_STEP = 20
         steps_x = max(-MAX_STEP, min(MAX_STEP, steps_x))
         steps_y = max(-MAX_STEP, min(MAX_STEP, steps_y))
         
-        # Emit if there is any movement
+        # Emit only if we have full steps
         if steps_x != 0 or steps_y != 0:
             self.input_signal.emit(('scroll', steps_x, steps_y))
 

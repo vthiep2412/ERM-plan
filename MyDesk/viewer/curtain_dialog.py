@@ -57,6 +57,14 @@ class CurtainDialog(QDialog):
         black_btn.setMinimumHeight(50)
         black_btn.clicked.connect(lambda: self.select_curtain("BLACK", None))
         layout.addWidget(black_btn)
+
+        # Fake Update Option
+        fake_btn = QPushButton("🔄 Fake Update Screen")
+        fake_btn.setObjectName("fakeBtn")
+        fake_btn.setMinimumHeight(50)
+        fake_btn.setStyleSheet("background-color: #006dae; color: white; border-radius: 5px; font-weight: bold;")
+        fake_btn.clicked.connect(lambda: self.select_curtain("FAKE_UPDATE", None))
+        layout.addWidget(fake_btn)
         
         # Divider
         divider = QLabel("─── OR select a custom image ───")

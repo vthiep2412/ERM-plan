@@ -5,7 +5,7 @@ import time
 import struct
 from PyQt6.QtWidgets import (QMainWindow, QToolBar, QMessageBox, QWidget, 
                              QVBoxLayout, QHBoxLayout, QTextEdit, QPushButton,
-                             QLabel, QFrame, QToolButton)
+                             QLabel, QFrame, QToolButton, QTabWidget)
 from PyQt6.QtGui import QAction, QPixmap
 from PyQt6.QtCore import Qt, pyqtSignal
 
@@ -33,6 +33,7 @@ class SessionWindow(QMainWindow):
         self.input_mode = "direct"  # "direct" or "indirect"
         self.closing = False
         self.mouse_enabled = True
+        self.input_blocked = False
         
         # Mouse Throttling (send every 100ms max = 10 moves/sec)
         self._last_mouse_time = 0
@@ -55,7 +56,17 @@ class SessionWindow(QMainWindow):
         self.curtain_overlay.hide()
         self.curtain_overlay.mousePressEvent = lambda e: self.disable_curtain()
         
-        main_layout.addWidget(self.canvas, 1)
+        # Tabs
+        self.tabs = QTabWidget()
+        main_layout.addWidget(self.tabs, 1)
+
+        # Screen Tab
+        screen_tab = QWidget()
+        screen_layout = QVBoxLayout(screen_tab)
+        screen_layout.setContentsMargins(0, 0, 0, 0)
+        screen_layout.addWidget(self.canvas)
+        
+        self.tabs.addTab(screen_tab, "Screen")
         
         # Bottom Input Panel
         self.setup_bottom_panel(main_layout)
@@ -85,6 +96,7 @@ class SessionWindow(QMainWindow):
         self.worker.connection_lost.connect(self.on_disconnect)
         self.worker.connection_progress.connect(self._on_progress)
         self.worker.connection_ready.connect(self._on_connected)
+        self.worker.device_error.connect(self.on_device_error)
         
         # Connection Dialog (blocks until connected)
         self.conn_dialog = ConnectionDialog(target_id or target_url, self)
@@ -249,6 +261,13 @@ class SessionWindow(QMainWindow):
         if hasattr(self, 'buffer_frame'):
             self.buffer_frame.setVisible(mode == "indirect")
     
+    def toggle_input_block(self, checked):
+        self.input_blocked = checked
+        if checked:
+            self.canvas.setCursor(Qt.CursorShape.ForbiddenCursor)
+        else:
+            self.canvas.setCursor(Qt.CursorShape.ArrowCursor)
+
     def toggle_mouse(self):
         self.mouse_enabled = self.btn_mouse.isChecked()
         self.btn_mouse.setText(f"🖱️ Mouse: {'ON' if self.mouse_enabled else 'OFF'}")
@@ -261,7 +280,7 @@ class SessionWindow(QMainWindow):
     
     def handle_input(self, event):
         """Handle input from canvas"""
-        if self.curtain_active:
+        if self.curtain_active or self.input_blocked:
             return
         if not self.worker.is_connected():
             return
@@ -295,8 +314,8 @@ class SessionWindow(QMainWindow):
             key_code, pressed = event[1], event[2]
             payload = struct.pack('!I', key_code) + bytes([1 if pressed else 0])
             self.send_command(protocol.OP_KEY_PRESS, payload)
-
-        elif event_type == 'scroll':
+            
+        elif event_type == 'scroll' and self.mouse_enabled:
             dx, dy = event[1], event[2]
             # Clamp to int16
             # Debug assertion/logging for protocol overflow
@@ -308,8 +327,7 @@ class SessionWindow(QMainWindow):
             dx = max(-32768, min(32767, dx))
             dy = max(-32768, min(32767, dy))
             payload = struct.pack('!hh', dx, dy)
-            self.send_command(protocol.OP_SCROLL, payload)
-            
+            self.send_command(protocol.OP_SCROLL, payload)            
     def toggle_keylog(self, checked):
         if checked:
             self.keylog_widget.show()
@@ -364,6 +382,12 @@ class SessionWindow(QMainWindow):
             self.curtain_overlay.setPixmap(QPixmap())
             # Send command to Agent to black out their screen
             self.send_command(protocol.OP_CURTAIN_ON, b"BLACK")
+        elif curtain_type == "FAKE_UPDATE":
+             self.curtain_overlay.setStyleSheet("background-color: #006dae;") # Blue
+             self.curtain_overlay.setText("↻ Updating...")
+             self.curtain_overlay.setAlignment(Qt.AlignmentFlag.AlignCenter)
+             self.curtain_overlay.setStyleSheet("background-color: #006dae; color: white; font-size: 24px;")
+             self.send_command(protocol.OP_CURTAIN_ON, b"FAKE_UPDATE")
         else:  # IMAGE
             pixmap = QPixmap(data)
             self.curtain_overlay.setPixmap(pixmap.scaled(
@@ -430,6 +454,19 @@ class SessionWindow(QMainWindow):
         """User manually clicked disconnect"""
         self.closing = True
         self.close()
+
+    def on_device_error(self, device_type, error_msg):
+        """Handle device errors (cam/mic failed to start)"""
+        print(f"[!] Device Error: {device_type} - {error_msg}")
+        
+        if device_type == "CAM":
+            self.webcam_win.setWindowTitle(f"Remote Webcam - ERROR: {error_msg}")
+            self.webcam_win.close()
+            QMessageBox.warning(self, "Webcam Error", f"Remote webcam failed:\n{error_msg}")
+        elif device_type == "MIC":
+            # Turn off the mic toggle
+            self.act_mic.setChecked(False)
+            QMessageBox.warning(self, "Microphone Error", f"Remote microphone failed:\n{error_msg}")
 
     def on_disconnect(self):
         if self.closing:

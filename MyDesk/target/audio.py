@@ -53,13 +53,41 @@ class AudioStreamer:
             # Non-blocking read? PyAudio read is blocking by default.
             # We use exception_on_overflow=False to avoid crashes.
             data = self.stream.read(self.CHUNK, exception_on_overflow=False)
+            self._restart_attempts = 0  # Reset on success
             return data
         except Exception as e:
             print(f"[-] Mic Read Error: {e}")
-            # Try to restart stream
+            
+            # Restart Backoff Logic
+            import time
+            now = time.time()
+            cooldown_seconds = 2.0
+            max_attempts = 5
+            
+            if not hasattr(self, '_restart_attempts'):
+                self._restart_attempts = 0
+            if not hasattr(self, '_last_restart_time'):
+                self._last_restart_time = 0
+            
+            # Check cooldown
+            if now - self._last_restart_time < cooldown_seconds:
+                return None  # Still in cooldown
+            
+            # Check max attempts
+            if self._restart_attempts >= max_attempts:
+                print(f"[-] Mic Max Restart Attempts ({max_attempts}) Reached. Giving up.")
+                self.stop()
+                return None
+            
+            # Try restart
+            self._restart_attempts += 1
+            self._last_restart_time = now
             try:
                 self.stop()
-                self.start()
+                if self.start():
+                    print(f"[*] Mic Restart Attempt {self._restart_attempts} succeeded.")
+                else:
+                    print(f"[-] Mic Restart Attempt {self._restart_attempts} failed.")
             except Exception as restart_err: 
                 print(f"[-] Mic Restart Error: {restart_err}")
             return None

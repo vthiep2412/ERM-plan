@@ -206,11 +206,11 @@ def parse_key_press(payload):
 
 def parse_scroll(payload):
     """Parse scroll payload: dx, dy (2 signed shorts). 
-    Payload must be exactly 4 bytes.
+    Requires at least 4 bytes; trailing bytes are ignored for consistency with other parsers.
     """
-    if len(payload) != 4:
+    if len(payload) < 4:
         return 0, 0
-    dx, dy = struct.unpack('!hh', payload)
+    dx, dy = struct.unpack('!hh', payload[:4])
     return dx, dy
 
 
@@ -218,7 +218,6 @@ def parse_scroll(payload):
 #  DIRECT INPUT (Low-Level Windows Injection)
 # ============================================================================
 import ctypes
-from ctypes import wintypes
 
 # C Structs for SendInput
 PUL = ctypes.POINTER(ctypes.c_ulong)
@@ -227,7 +226,7 @@ class KeyBdInput(ctypes.Structure):
                 ("wScan", ctypes.c_ushort),
                 ("dwFlags", ctypes.c_ulong),
                 ("time", ctypes.c_ulong),
-                ("dwExtraInfo", PUL)]
+                ("dwExtraInfo", ctypes.c_void_p)]  # ULONG_PTR
 class HardwareInput(ctypes.Structure):
     _fields_ = [("uMsg", ctypes.c_ulong),
                 ("wParamL", ctypes.c_short),
@@ -238,7 +237,7 @@ class MouseInput(ctypes.Structure):
                 ("mouseData", ctypes.c_ulong),
                 ("dwFlags", ctypes.c_ulong),
                 ("time", ctypes.c_ulong),
-                ("dwExtraInfo", PUL)]
+                ("dwExtraInfo", ctypes.c_void_p)]  # ULONG_PTR
 class Input_I(ctypes.Union):
     _fields_ = [("ki", KeyBdInput),
                 ("mi", MouseInput),
@@ -253,6 +252,7 @@ KEYEVENTF_EXTENDEDKEY = 0x0001
 KEYEVENTF_KEYUP = 0x0002
 KEYEVENTF_SCANCODE = 0x0008
 KEYEVENTF_UNICODE = 0x0004
+MAPVK_VK_TO_VSC_EX = 0x04  # Extended scan code mapping
 
 # Scan Code Mapping (REMOVED: Using MapVirtualKeyW instead)
 
@@ -275,8 +275,8 @@ def press_key_direct(hexKeyCode, pressed):
     
     # We use Virtual Key codes (VK) -> Scan Code conversion by Windows
     # to avoid manual mapping hell
-    # MAPVK_VK_TO_VSC_EX (4) handles extended keys better (numpad, arrows)
-    scan_code = ctypes.windll.user32.MapVirtualKeyW(hexKeyCode, 4)
+    # MAPVK_VK_TO_VSC_EX handles extended keys better (numpad, arrows)
+    scan_code = ctypes.windll.user32.MapVirtualKeyW(hexKeyCode, MAPVK_VK_TO_VSC_EX)
     
     # Error Check for MapVirtualKeyW
     if scan_code == 0:
@@ -313,11 +313,14 @@ if HAS_PYNPUT and hasattr(ctypes, 'windll'):
     # Add VK mapping helper
     # Maps Qt key codes to Windows VK Codes
     def qt_to_vk(key_code):
-        # Basic ASCII
-        if 32 <= key_code <= 126:
-            # Uppercase ASCII matches VK for A-Z and 0-9
-            c = chr(key_code).upper()
-            return ord(c)
+        # Alphanumerics only (A-Z, a-z, 0-9)
+        # These map directly to VK codes. Symbols are handled by pynput fallback.
+        if ord('0') <= key_code <= ord('9'):
+            return key_code  # 0-9 match VK
+        if ord('A') <= key_code <= ord('Z'):
+            return key_code  # A-Z match VK
+        if ord('a') <= key_code <= ord('z'):
+            return key_code - 32  # Convert to uppercase VK
         
         # Special Keys map
         qt_vk_map = {

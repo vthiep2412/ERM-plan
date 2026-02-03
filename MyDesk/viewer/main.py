@@ -60,7 +60,7 @@ class ClientManager(QMainWindow):
                 with open(CONFIG_FILE, 'r') as f:
                     return json.load(f)
             except Exception:
-                pass
+                print("[!] Failed to load config, using defaults")
         return {"broker_url": DEFAULT_BROKER, "history": []}
 
     def save_config(self):
@@ -176,7 +176,7 @@ class ClientManager(QMainWindow):
                 target_url = item.get('url', '')
                 
                 # Check for legacy "Broker" strings or new "broker" key
-                is_broker = (mode_key == self.MODE_BROKER or isinstance(mode_key, str) and "Broker" in mode_key)
+                is_broker = (mode_key == self.MODE_BROKER) or (isinstance(mode_key, str) and "Broker" in mode_key)
 
                 if is_broker:
                     label = f"[{alias}] ID: {item_id}"
@@ -194,9 +194,9 @@ class ClientManager(QMainWindow):
             
             # Legacy conversion
             if isinstance(mode_key, str) and "Broker" in mode_key and mode_key != self.MODE_BROKER:
-                 mode_key = self.MODE_BROKER
+                mode_key = self.MODE_BROKER
             elif isinstance(mode_key, str) and "Direct" in mode_key and mode_key != self.MODE_DIRECT:
-                 mode_key = self.MODE_DIRECT
+                mode_key = self.MODE_DIRECT
 
             # Find data
             index = self.mode_combo.findData(mode_key)            
@@ -251,14 +251,9 @@ class ClientManager(QMainWindow):
     def update_history(self, mode, alias, url, target_id):
         history = self.config.get("history", [])
         
-        # Deduplicate history: Remove identical entry if exists to move it to top.
-        # Uniqueness is defined by the tuple (mode, id, url, alias).
-        history = [h for h in history if not (
-            h.get('mode') == mode and 
-            h.get('id') == target_id and 
-            h.get('url') == url and
-            h.get('alias') == alias
-        )]
+        # Deduplicate history: Remove entry with same URL to move it to top.
+        # This way reconnecting to the same URL updates its position and timestamp.
+        history = [h for h in history if h.get('url') != url]
         
         new_entry = {
             "mode": mode,

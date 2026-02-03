@@ -40,15 +40,18 @@ class WebcamStreamer:
                         continue
                 
                 if not found:
-                     print("[-] No working webcam found in indices 0-2")
-                     return False
+                    print("[-] No working webcam found in indices 0-2")
+                    return False
 
                 self.cap.set(cv2.CAP_PROP_FRAME_WIDTH, 320)
                 self.cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 240)
                 self.cap.set(cv2.CAP_PROP_FPS, 15)
                 
+                # Defensive check: isOpened() should always be true here due to
+                # camera discovery loop above, but VideoCapture.set() could theoretically
+                # cause side-effects on some drivers. Kept for safety.
                 if not self.cap.isOpened():
-                    print("[-] Could not open Webcam")
+                    print("[-] Webcam closed unexpectedly after set()")
                     self.cap = None
                     return False
                     

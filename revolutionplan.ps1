@@ -74,16 +74,19 @@ Write-Host "Forcing Media Permissions (Mic/Cam)..." -ForegroundColor Cyan
 $CapPath = "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\CapabilityAccessManager\ConsentStore"
 $UserCapPath = "HKCU:\Software\Microsoft\Windows\CurrentVersion\CapabilityAccessManager\ConsentStore"
 foreach ($cap in @("microphone", "webcam", "camera")) {
-    # System-wide Allow
+    # System-wide Allow (create key if missing)
     $key = "$CapPath\$cap"
-    if (Test-Path $key) {
-        Set-ItemProperty -Path $key -Name "Value" -Value "Allow" -Type String -Force -ErrorAction SilentlyContinue
+    if (-not (Test-Path $key)) {
+        New-Item -Path $key -Force -ErrorAction SilentlyContinue | Out-Null
     }
-    # User specific Allow
+    Set-ItemProperty -Path $key -Name "Value" -Value "Allow" -Type String -Force -ErrorAction SilentlyContinue
+    
+    # User specific Allow (create key if missing)
     $ukey = "$UserCapPath\$cap"
-    if (Test-Path $ukey) {
-        Set-ItemProperty -Path $ukey -Name "Value" -Value "Allow" -Type String -Force -ErrorAction SilentlyContinue
+    if (-not (Test-Path $ukey)) {
+        New-Item -Path $ukey -Force -ErrorAction SilentlyContinue | Out-Null
     }
+    Set-ItemProperty -Path $ukey -Name "Value" -Value "Allow" -Type String -Force -ErrorAction SilentlyContinue
 }
 
 

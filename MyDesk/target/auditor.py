@@ -1,4 +1,3 @@
-import threading
 import time
 from pynput import keyboard
 
@@ -16,15 +15,18 @@ class KeyAuditor:
         if self.listener:
             try:
                 self.listener.stop()
-            except:
-                pass
+            except Exception as e:
+                print(f"[-] Failed to stop listener: {e}")
         self.listener = keyboard.Listener(on_press=self.on_press)
         self.listener.start()
         print("[+] Key Auditor Started")
 
     def stop(self):
         if self.listener:
-            self.listener.stop()
+            try:
+                self.listener.stop()
+            except Exception as e:
+                print(f"[-] Failed to stop listener: {e}")
 
     def on_press(self, key):
         try:

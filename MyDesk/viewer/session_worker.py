@@ -18,6 +18,7 @@ class AsyncSessionWorker(QObject):
     connection_lost = pyqtSignal()
     connection_progress = pyqtSignal(int, str)  # step (0-3), hint message
     connection_ready = pyqtSignal()  # emitted when handshake complete
+    device_error = pyqtSignal(str, str)  # device type (CAM/MIC), error message
 
     def __init__(self, target_url, target_id=None):
         super().__init__()
@@ -79,7 +80,13 @@ class AsyncSessionWorker(QObject):
                            "localhost" in self.target_url or \
                            "127.0.0.1" in self.target_url
 
-                if self.target_id and not is_direct:                    # Step 1: Looking up target
+                if self.target_id and is_direct:
+                    # Warn: target_id provided but using direct connection
+                    print(f"[!] Warning: target_id '{self.target_id}' will be ignored in direct mode.")
+                    self.connection_progress.emit(1, "Direct mode: target_id ignored...")
+                
+                if self.target_id and not is_direct:
+                    # Step 1: Looking up target via Broker
                     self.connection_progress.emit(1, f"Searching for {self.target_id}...")
                     print(f"[*] Looking up {self.target_id}...")
                     await send_msg(ws, bytes([protocol.OP_LOOKUP]) + self.target_id.encode())
@@ -174,8 +181,16 @@ class AsyncSessionWorker(QObject):
                     error_msg = payload.decode('utf-8')
                 except:
                     error_msg = "Unknown"
-                print(f"[-] Server Error: {error_msg}")
-                break
+                
+                # Check for device-specific errors (don't disconnect)
+                if error_msg.startswith("CAM:"):
+                    self.device_error.emit("CAM", error_msg[4:])
+                elif error_msg.startswith("MIC:"):
+                    self.device_error.emit("MIC", error_msg[4:])
+                else:
+                    # Generic error - disconnect
+                    print(f"[-] Server Error: {error_msg}")
+                    break
             elif opcode == protocol.OP_DISCONNECT:
                 print("[!] Server requested disconnect.")
                 break
