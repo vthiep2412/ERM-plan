@@ -18,6 +18,8 @@ class AudioStreamer:
 
     def start(self):
         if not self.pa or self.running: return False
+        # Reset restart counter for fresh start
+        self._restart_attempts = 0
         try:
             self.stream = self.pa.open(format=self.FORMAT,
                                        channels=self.CHANNELS,

@@ -210,10 +210,9 @@ def parse_scroll(payload):
     """
     if len(payload) < 4:
         print(f"[!] parse_scroll: Short payload ({len(payload)} bytes, expected 4)")
-        return 0, 0
+        return None, None
     dx, dy = struct.unpack('!hh', payload[:4])
     return dx, dy
-
 
 # ============================================================================
 #  DIRECT INPUT (Low-Level Windows Injection)

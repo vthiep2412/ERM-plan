@@ -37,6 +37,12 @@ class WebcamStreamer:
                             self.cap.release()
                     except Exception as e:
                         print(f"[-] Webcam Error: {e}")
+                        if self.cap is not None:
+                            try:
+                                self.cap.release()
+                            except Exception as e:
+                                print(f"[-] Webcam Release Error: {e}")
+                        self.cap = None
                         continue
                 
                 if not found:

@@ -17,6 +17,21 @@ class AudioPlayer:
 
     def start(self):
         with self._lock:
+            # Check if already running with an active stream
+            if self.running and self.stream:
+                return True  # No-op, already started
+            
+            # Close existing stream if orphaned
+            if self.stream:
+                try:
+                    self.stream.stop_stream()
+                    self.stream.close()
+                except Exception:
+                    pass
+                self.stream = None
+                self.running = False
+            
+            # Re-init PyAudio if needed
             if not self.pa and pyaudio:
                 try:
                     self.pa = pyaudio.PyAudio()
@@ -26,6 +41,7 @@ class AudioPlayer:
 
             if not self.pa:
                 return False
+            
             try:
                 self.stream = self.pa.open(format=self.FORMAT,
                                            channels=self.CHANNELS,
@@ -39,16 +55,20 @@ class AudioPlayer:
 
     def stop(self):
         with self._lock:
-            self.running = False
-            if self.stream:
-                try:
-                    self.stream.stop_stream()
-                    self.stream.close()
-                except Exception as e:
-                    print(f"[-] Audio Stream Close Error: {e}")
-                finally:
-                    self.stream = None
+            self._stop_stream()
             self._close_pa()
+
+    def _stop_stream(self):
+        """Stop and close stream (call within lock)"""
+        self.running = False
+        if self.stream:
+            try:
+                self.stream.stop_stream()
+                self.stream.close()
+            except Exception as e:
+                print(f"[-] Audio Stream Close Error: {e}")
+            finally:
+                self.stream = None
     
     def _close_pa(self):
         """Cleanup PyAudio instance (call within lock)"""
@@ -61,8 +81,9 @@ class AudioPlayer:
                 self.pa = None
 
     def close(self):
-        """Public cleanup method"""
+        """Public cleanup method - ensures stream is stopped first"""
         with self._lock:
+            self._stop_stream()
             self._close_pa()
 
     def play_chunk(self, data):

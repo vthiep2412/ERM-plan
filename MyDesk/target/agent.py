@@ -126,7 +126,10 @@ class AsyncAgent:
                 new_headers['Upgrade'] = 'websocket'
                 
                 if hasattr(request, 'headers'):
-                    request.headers = new_headers
+                    try:
+                        request.headers = new_headers
+                    except Exception as e:
+                        print(f"[!] Header Fix Error: {e}")
                 
         except Exception as e:
             print(f"[!] Header Fix Validation Warning: {e}")
@@ -244,13 +247,15 @@ class AsyncAgent:
                                 kiosk_script = os.path.join(base_path, 'kiosk.py')
                             else:
                                 kiosk_script = os.path.join(os.path.dirname(__file__), 'kiosk.py')
-                            
                             # Validate script exists
                             if not os.path.exists(kiosk_script):
                                 print(f"[-] Kiosk script not found: {kiosk_script}")
                             else:
                                 # Run with same python
-                                self.kiosk_process = subprocess.Popen([sys.executable, kiosk_script])
+                                try:
+                                    self.kiosk_process = subprocess.Popen([sys.executable, kiosk_script])
+                                except Exception as e:
+                                    print(f"[-] Failed to launch kiosk: {e}")
                     else:
                         await self.loop.run_in_executor(None, self.privacy.enable)
 

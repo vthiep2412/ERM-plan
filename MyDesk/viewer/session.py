@@ -316,7 +316,7 @@ class SessionWindow(QMainWindow):
             self.send_command(protocol.OP_KEY_PRESS, payload)
             
         elif event_type == 'scroll' and self.mouse_enabled:
-            dx, dy = event[1], event[2]
+            dx, dy = int(event[1]), int(event[2])
             # Clamp to int16
             # Debug assertion/logging for protocol overflow
             if not (-100 <= dx <= 100) or not (-100 <= dy <= 100):
@@ -328,7 +328,6 @@ class SessionWindow(QMainWindow):
             dy = max(-32768, min(32767, dy))
             payload = struct.pack('!hh', dx, dy)
             self.send_command(protocol.OP_SCROLL, payload)
-
     def toggle_keylog(self, checked):
         if checked:
             self.keylog_widget.show()

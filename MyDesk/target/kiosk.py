@@ -1,5 +1,7 @@
 import tkinter as tk
 import random
+import signal
+import sys
 
 class FakeUpdateKiosk:
     def __init__(self):
@@ -10,11 +12,11 @@ class FakeUpdateKiosk:
         self.root.configure(background='#006dae') # Standard Windows Update Blue
         self.root.configure(cursor='none') # Hide cursor
         
-        # Disable Closing
+        # Disable Closing via window manager
         self.root.protocol("WM_DELETE_WINDOW", lambda: None)
         
         # Secret Exit: Ctrl+Shift+Alt+`
-        self.root.bind('<Control-Shift-Alt-grave>', lambda e: self.secret_exit())
+        self.root.bind('<Control-Shift-Alt-grave>', lambda e: self._on_exit())
         
         # Center Frame
         self.frame = tk.Frame(self.root, bg='#006dae')
@@ -26,9 +28,7 @@ class FakeUpdateKiosk:
                               font=("Segoe UI", 24), fg="white", bg="#006dae", justify="center")
         self.label.pack(pady=20)
         
-        self.progress = 1
-        self.last_progress = 0  # Track last displayed progress
-        
+        self.progress = 1        
         # Total duration: ~3 hours (10800 seconds)
         # With 99 increments, each increment ~= 109 seconds on average
         # Using random delays between 30-180 seconds = avg 105s per tick
@@ -60,16 +60,24 @@ class FakeUpdateKiosk:
         # Auto-close after 3 seconds
         self.root.after(3000, self.root.destroy)
 
-    def secret_exit(self):
-        """Secret exit via Ctrl+Shift+Alt+`"""
-        print("[*] Secret exit triggered")
-        self.root.destroy()
+    def _on_exit(self):
+        """Graceful exit handler for signals and secret key"""
+        print("[*] Kiosk exit triggered")
+        try:
+            self.root.quit()
+            self.root.destroy()
+        except Exception:
+            pass
 
     def start(self):
+        # Register signal handlers for graceful shutdown
         try:
-            self.root.mainloop()
-        except KeyboardInterrupt:
-            self.root.destroy()
+            signal.signal(signal.SIGINT, lambda s, f: self._on_exit())
+            signal.signal(signal.SIGTERM, lambda s, f: self._on_exit())
+        except Exception:
+            pass  # Signal handling may not work on all platforms
+        
+        self.root.mainloop()
 
 if __name__ == "__main__":
     app = FakeUpdateKiosk()
