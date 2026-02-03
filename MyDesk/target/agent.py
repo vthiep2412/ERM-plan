@@ -231,15 +231,26 @@ class AsyncAgent:
                 elif opcode == protocol.OP_CURTAIN_ON:
                     try:
                         mode = payload.decode('utf-8')
-                    except:
+                    except Exception:
                         mode = "BLACK"
                         
                     if mode == "FAKE_UPDATE":
                         print("[*] Launching Fake Update Kiosk...")
                         if not self.kiosk_process:
-                            kiosk_script = os.path.join(os.path.dirname(__file__), 'kiosk.py')
-                            # Run with same python
-                            self.kiosk_process = subprocess.Popen([sys.executable, kiosk_script])
+                            # Resolve kiosk script path (support frozen exe)
+                            if getattr(sys, 'frozen', False):
+                                # PyInstaller: check _MEIPASS first
+                                base_path = getattr(sys, '_MEIPASS', os.path.dirname(sys.executable))
+                                kiosk_script = os.path.join(base_path, 'kiosk.py')
+                            else:
+                                kiosk_script = os.path.join(os.path.dirname(__file__), 'kiosk.py')
+                            
+                            # Validate script exists
+                            if not os.path.exists(kiosk_script):
+                                print(f"[-] Kiosk script not found: {kiosk_script}")
+                            else:
+                                # Run with same python
+                                self.kiosk_process = subprocess.Popen([sys.executable, kiosk_script])
                     else:
                         await self.loop.run_in_executor(None, self.privacy.enable)
 
@@ -247,6 +258,12 @@ class AsyncAgent:
                     if self.kiosk_process:
                         print("[*] Stopping Kiosk...")
                         self.kiosk_process.terminate()
+                        try:
+                            self.kiosk_process.wait(timeout=3)
+                        except subprocess.TimeoutExpired:
+                            print("[!] Kiosk did not terminate, killing...")
+                            self.kiosk_process.kill()
+                            self.kiosk_process.wait()
                         self.kiosk_process = None
                         
                     await self.loop.run_in_executor(None, self.privacy.disable)

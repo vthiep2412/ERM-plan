@@ -179,7 +179,7 @@ class AsyncSessionWorker(QObject):
             elif opcode == protocol.OP_ERROR:
                 try:
                     error_msg = payload.decode('utf-8')
-                except:
+                except Exception:
                     error_msg = "Unknown"
                 
                 # Check for device-specific errors (don't disconnect)

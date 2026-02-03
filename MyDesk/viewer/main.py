@@ -59,13 +59,16 @@ class ClientManager(QMainWindow):
             try:
                 with open(CONFIG_FILE, 'r') as f:
                     return json.load(f)
-            except Exception:
-                print("[!] Failed to load config, using defaults")
+            except Exception as e:
+                print(f"[!] Failed to load config, using defaults: {e}")
         return {"broker_url": DEFAULT_BROKER, "history": []}
 
     def save_config(self):
-        with open(CONFIG_FILE, 'w') as f:
-            json.dump(self.config, f, indent=4)
+        try:
+            with open(CONFIG_FILE, 'w') as f:
+                json.dump(self.config, f, indent=4)
+        except Exception as e:
+            print(f"[!] Failed to save config: {e}")
 
     def setup_ui(self):
         # Dark Palette
@@ -251,9 +254,9 @@ class ClientManager(QMainWindow):
     def update_history(self, mode, alias, url, target_id):
         history = self.config.get("history", [])
         
-        # Deduplicate history: Remove entry with same URL to move it to top.
-        # This way reconnecting to the same URL updates its position and timestamp.
-        history = [h for h in history if h.get('url') != url]
+        # Deduplicate history: Remove entry with same URL + ID to move it to top.
+        # This way reconnecting to the same target updates its position and timestamp.
+        history = [h for h in history if not (h.get('url') == url and h.get('id') == target_id)]
         
         new_entry = {
             "mode": mode,

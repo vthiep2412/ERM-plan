@@ -34,6 +34,13 @@ class CurtainDialog(QDialog):
             QPushButton:hover { background-color: #505050; }
             QPushButton#blackBtn { background-color: #2D2D30; border: 2px solid #666; }
             QPushButton#blackBtn:hover { border-color: #007ACC; }
+            QPushButton#fakeBtn { 
+                background-color: #006dae; 
+                color: white; 
+                border-radius: 5px; 
+                font-weight: bold; 
+            }
+            QPushButton#fakeBtn:hover { background-color: #0088dd; }
             QListWidget { 
                 background-color: #2D2D30; 
                 border: 1px solid #3E3E42;
@@ -62,7 +69,6 @@ class CurtainDialog(QDialog):
         fake_btn = QPushButton("🔄 Fake Update Screen")
         fake_btn.setObjectName("fakeBtn")
         fake_btn.setMinimumHeight(50)
-        fake_btn.setStyleSheet("background-color: #006dae; color: white; border-radius: 5px; font-weight: bold;")
         fake_btn.clicked.connect(lambda: self.select_curtain("FAKE_UPDATE", None))
         layout.addWidget(fake_btn)
         

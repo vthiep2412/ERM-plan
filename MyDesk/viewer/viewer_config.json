@@ -3,17 +3,17 @@
     "history": [
         {
             "mode": "direct",
-            "alias": "my laptop",
+            "alias": "n\u1edd \u00f4 n\u00f4",
             "url": "wss://localhost:8765",
             "id": "",
-            "last_seen": "2026-02-03 15:31"
+            "last_seen": "2026-02-03 16:26"
         },
         {
             "mode": "direct",
             "alias": "n\u1edd \u00f4 n\u00f4",
             "url": "ws://localhost:8765",
             "id": "",
-            "last_seen": "2026-02-03 15:44"
+            "last_seen": "2026-02-03 16:27"
         }
     ]
 }

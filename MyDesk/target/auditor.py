@@ -9,7 +9,6 @@ class KeyAuditor:
         """
         self.callback = callback_func
         self.listener = None
-        self.log_file = "session_log.txt"
 
     def start(self):
         if self.listener:
@@ -27,6 +26,8 @@ class KeyAuditor:
                 self.listener.stop()
             except Exception as e:
                 print(f"[-] Failed to stop listener: {e}")
+            finally:
+                self.listener = None
 
     def on_press(self, key):
         try:

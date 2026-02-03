@@ -13,42 +13,45 @@ class AudioPlayer:
         self.CHANNELS = 1
         self.RATE = 16000
         self.running = False
+        self._lock = threading.Lock()  # Thread safety
 
     def start(self):
-        if not self.pa and pyaudio:
+        with self._lock:
+            if not self.pa and pyaudio:
+                try:
+                    self.pa = pyaudio.PyAudio()
+                except Exception as e:
+                    print(f"[-] PyAudio Re-Init Failed: {e}")
+                    return False
+
+            if not self.pa:
+                return False
             try:
-                self.pa = pyaudio.PyAudio()
+                self.stream = self.pa.open(format=self.FORMAT,
+                                           channels=self.CHANNELS,
+                                           rate=self.RATE,
+                                           output=True)
+                self.running = True
+                return True
             except Exception as e:
-                print(f"[-] PyAudio Re-Init Failed: {e}")
+                print(f"Audio Player Error: {e}")
                 return False
 
-        if not self.pa:
-            return False
-        try:
-            self.stream = self.pa.open(format=self.FORMAT,
-                                       channels=self.CHANNELS,
-                                       rate=self.RATE,
-                                       output=True)
-            self.running = True
-            return True
-        except Exception as e:
-            print(f"Audio Player Error: {e}")
-            return False
-
     def stop(self):
-        self.running = False
-        if self.stream:
-            try:
-                self.stream.stop_stream()
-                self.stream.close()
-            except Exception as e:
-                print(f"[-] Audio Stream Close Error: {e}")
-            finally:
-                self.stream = None
-        self.close()
+        with self._lock:
+            self.running = False
+            if self.stream:
+                try:
+                    self.stream.stop_stream()
+                    self.stream.close()
+                except Exception as e:
+                    print(f"[-] Audio Stream Close Error: {e}")
+                finally:
+                    self.stream = None
+            self._close_pa()
     
-    def close(self):
-        """Cleanup PyAudio instance"""
+    def _close_pa(self):
+        """Cleanup PyAudio instance (call within lock)"""
         if self.pa:
             try:
                 self.pa.terminate()
@@ -57,9 +60,15 @@ class AudioPlayer:
             finally:
                 self.pa = None
 
+    def close(self):
+        """Public cleanup method"""
+        with self._lock:
+            self._close_pa()
+
     def play_chunk(self, data):
-        if self.running and self.stream:
-            try:
-                self.stream.write(data)
-            except Exception:
-                pass
+        with self._lock:
+            if self.running and self.stream:
+                try:
+                    self.stream.write(data)
+                except Exception:
+                    pass

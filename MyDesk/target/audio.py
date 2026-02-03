@@ -1,4 +1,3 @@
-import threading
 import time
 try:
     import pyaudio
@@ -14,6 +13,8 @@ class AudioStreamer:
         self.CHANNELS = 1
         self.RATE = 16000 # 16kHz is enough for voice, saves bandwidth
         self.CHUNK = 1024
+        self._restart_attempts = 0
+        self._last_restart_time = 0
 
     def start(self):
         if not self.pa or self.running: return False
@@ -59,15 +60,9 @@ class AudioStreamer:
             print(f"[-] Mic Read Error: {e}")
             
             # Restart Backoff Logic
-            import time
             now = time.time()
-            cooldown_seconds = 2.0
+            cooldown_seconds = 1.0
             max_attempts = 5
-            
-            if not hasattr(self, '_restart_attempts'):
-                self._restart_attempts = 0
-            if not hasattr(self, '_last_restart_time'):
-                self._last_restart_time = 0
             
             # Check cooldown
             if now - self._last_restart_time < cooldown_seconds:

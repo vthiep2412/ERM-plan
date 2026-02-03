@@ -209,6 +209,7 @@ def parse_scroll(payload):
     Requires at least 4 bytes; trailing bytes are ignored for consistency with other parsers.
     """
     if len(payload) < 4:
+        print(f"[!] parse_scroll: Short payload ({len(payload)} bytes, expected 4)")
         return 0, 0
     dx, dy = struct.unpack('!hh', payload[:4])
     return dx, dy
@@ -295,7 +296,7 @@ def press_key_direct(hexKeyCode, pressed):
     # Use Scan Code mode for games
     flags |= KEYEVENTF_SCANCODE
 
-    ii_.ki = KeyBdInput(0, scan_code, flags, 0, ctypes.pointer(extra))
+    ii_.ki = KeyBdInput(0, scan_code, flags, 0, extra.value)
     x = Input(INPUT_KEYBOARD, ii_)
     
     result = ctypes.windll.user32.SendInput(1, ctypes.pointer(x), ctypes.sizeof(x))
@@ -322,8 +323,8 @@ if HAS_PYNPUT and hasattr(ctypes, 'windll'):
         if ord('a') <= key_code <= ord('z'):
             return key_code - 32  # Convert to uppercase VK
         
-        # Special Keys map
         qt_vk_map = {
+            32: 0x20,       # Space
             16777216: 0x1B, # Esc
             16777217: 0x09, # Tab
             16777219: 0x08, # Backspace
