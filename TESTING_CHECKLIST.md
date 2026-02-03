@@ -43,7 +43,7 @@
 - [ ] Fake Update curtain (kiosk)
 - [ ] Custom image curtain
 - [ ] Curtain off → restores screen
-- [ ] Kiosk exit: `Ctrl+Shift+Alt+\``
+- [ ] Kiosk exit: `Ctrl+Shift+Alt+\`` (only works in kiosk mode, backtick is needed)
 
 ## ⌨️ Keylogger
 - [ ] Toggle shows log window

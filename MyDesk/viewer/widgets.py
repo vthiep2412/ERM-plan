@@ -113,20 +113,21 @@ class VideoCanvas(QLabel):
         steps_x = int(self._scroll_accum_x / 120)
         steps_y = int(self._scroll_accum_y / 120)
         
-        # Clamp steps BEFORE consuming to preserve large-scroll data
+        # Clamp steps for protocol safety
         MAX_STEP = 20
         clamped_x = max(-MAX_STEP, min(MAX_STEP, steps_x))
         clamped_y = max(-MAX_STEP, min(MAX_STEP, steps_y))
         
-        # Consume only the clamped portion from accumulator
-        if clamped_x != 0:
-            self._scroll_accum_x -= clamped_x * 120
-        if clamped_y != 0:
-            self._scroll_accum_y -= clamped_y * 120
+        # Consume FULL computed steps to drain accumulator (no leftover energy)
+        if steps_x != 0:
+            self._scroll_accum_x -= steps_x * 120
+        if steps_y != 0:
+            self._scroll_accum_y -= steps_y * 120
         
-        # Emit only if we have full steps
+        # Emit only if we have clamped steps
         if clamped_x != 0 or clamped_y != 0:
             self.input_signal.emit(('scroll', clamped_x, clamped_y))
+            e.accept()  # Mark event as handled
 
 
 class KeyLogWidget(QFrame):

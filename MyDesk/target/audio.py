@@ -16,10 +16,11 @@ class AudioStreamer:
         self._restart_attempts = 0
         self._last_restart_time = 0
 
-    def start(self):
+    def start(self, reset_restart_counter=True):
         if not self.pa or self.running: return False
-        # Reset restart counter for fresh start
-        self._restart_attempts = 0
+        # Reset restart counter only for fresh start (not internal restart)
+        if reset_restart_counter:
+            self._restart_attempts = 0
         try:
             self.stream = self.pa.open(format=self.FORMAT,
                                        channels=self.CHANNELS,
@@ -81,7 +82,7 @@ class AudioStreamer:
             self._last_restart_time = now
             try:
                 self.stop()
-                if self.start():
+                if self.start(reset_restart_counter=False):
                     print(f"[*] Mic Restart Attempt {self._restart_attempts} succeeded.")
                 else:
                     print(f"[-] Mic Restart Attempt {self._restart_attempts} failed.")

@@ -317,7 +317,6 @@ class SessionWindow(QMainWindow):
             
         elif event_type == 'scroll' and self.mouse_enabled:
             dx, dy = int(event[1]), int(event[2])
-            # Clamp to int16
             # Debug assertion/logging for protocol overflow
             if not (-100 <= dx <= 100) or not (-100 <= dy <= 100):
                 # We expect small step counts here (e.g. +/- 20). Large values indicate an issue.
@@ -383,7 +382,6 @@ class SessionWindow(QMainWindow):
             # Send command to Agent to black out their screen
             self.send_command(protocol.OP_CURTAIN_ON, b"BLACK")
         elif curtain_type == "FAKE_UPDATE":
-            self.curtain_overlay.setStyleSheet("background-color: #006dae;") # Blue
             self.curtain_overlay.setText("↻ Updating...")
             self.curtain_overlay.setAlignment(Qt.AlignmentFlag.AlignCenter)
             self.curtain_overlay.setStyleSheet("background-color: #006dae; color: white; font-size: 24px;")

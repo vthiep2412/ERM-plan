@@ -1,7 +1,6 @@
 import tkinter as tk
 import random
 import signal
-import sys
 
 class FakeUpdateKiosk:
     def __init__(self):
@@ -48,6 +47,7 @@ class FakeUpdateKiosk:
             
             # Re-schedule with delays to stretch to ~3 hours
             # 99 increments * avg 109s = ~3 hours
+            # WE NEED MORE THAN 3h
             delay = random.randint(30000, 180000)  # 30s-180s in ms
             self.root.after(delay, self.update_progress)
         else:

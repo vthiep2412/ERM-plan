@@ -91,5 +91,5 @@ class AudioPlayer:
             if self.running and self.stream:
                 try:
                     self.stream.write(data)
-                except Exception:
-                    pass
+                except Exception as e:
+                    print(f"[-] Audio Stream Write Error: {e}")
