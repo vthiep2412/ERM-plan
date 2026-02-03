@@ -211,3 +211,130 @@ def parse_scroll(payload):
         dy = struct.unpack('!b', payload[1:2])[0]
         return dx, dy
     return 0, 0
+
+
+# ============================================================================
+#  DIRECT INPUT (Low-Level Windows Injection)
+# ============================================================================
+import ctypes
+from ctypes import wintypes
+
+# C Structs for SendInput
+PUL = ctypes.POINTER(ctypes.c_ulong)
+class KeyBdInput(ctypes.Structure):
+    _fields_ = [("wVk", ctypes.c_ushort),
+                ("wScan", ctypes.c_ushort),
+                ("dwFlags", ctypes.c_ulong),
+                ("time", ctypes.c_ulong),
+                ("dwExtraInfo", PUL)]
+class HardwareInput(ctypes.Structure):
+    _fields_ = [("uMsg", ctypes.c_ulong),
+                ("wParamL", ctypes.c_short),
+                ("wParamH", ctypes.c_ushort)]
+class MouseInput(ctypes.Structure):
+    _fields_ = [("dx", ctypes.c_long),
+                ("dy", ctypes.c_long),
+                ("mouseData", ctypes.c_ulong),
+                ("dwFlags", ctypes.c_ulong),
+                ("time", ctypes.c_ulong),
+                ("dwExtraInfo", PUL)]
+class Input_I(ctypes.Union):
+    _fields_ = [("ki", KeyBdInput),
+                ("mi", MouseInput),
+                ("hi", HardwareInput)]
+class Input(ctypes.Structure):
+    _fields_ = [("type", ctypes.c_ulong),
+                ("ii", Input_I)]
+
+# Constants
+INPUT_KEYBOARD = 1
+KEYEVENTF_EXTENDEDKEY = 0x0001
+KEYEVENTF_KEYUP = 0x0002
+KEYEVENTF_SCANCODE = 0x0008
+KEYEVENTF_UNICODE = 0x0004
+
+# Scan Code Mapping (QWERTY)
+# Maps Qt Key codes/Chars to MapVirtualKey scan codes
+# Partial map for common keys
+SCAN_CODES = {
+    'w': 0x11, 'a': 0x1E, 's': 0x1F, 'd': 0x20,
+    'up': 0x48, 'left': 0x4B, 'down': 0x50, 'right': 0x4D,
+    'space': 0x39, 'enter': 0x1C, 'esc': 0x01,
+    'shift': 0x2A, 'ctrl': 0x1D, 'alt': 0x38,
+    'backspace': 0x0E, 'tab': 0x0F,
+}
+
+def press_key_direct(hexKeyCode, pressed):
+    """
+    Uses SendInput with ScanCodes for DirectX compatibility.
+    hexKeyCode: Virtual Key Code (VK)
+    """
+    extra = ctypes.c_ulong(0)
+    ii_ = Input_I()
+    
+    # Flags
+    flags = 0
+    if not pressed:
+        flags |= KEYEVENTF_KEYUP
+    
+    # We use Virtual Key codes (VK) -> Scan Code conversion by Windows
+    # to avoid manual mapping hell
+    scan_code = ctypes.windll.user32.MapVirtualKeyW(hexKeyCode, 0)
+    
+    # If MapVirtualKey fails or it's a special extended key (arrows)
+    if hexKeyCode in [0x25, 0x26, 0x27, 0x28, 0x2D, 0x2E, 0x21, 0x22, 0x23, 0x24]: 
+        flags |= KEYEVENTF_EXTENDEDKEY
+
+    # Use Scan Code mode for games
+    flags |= KEYEVENTF_SCANCODE
+
+    ii_.ki = KeyBdInput(0, scan_code, flags, 0, ctypes.pointer(extra))
+    x = Input(INPUT_KEYBOARD, ii_)
+    ctypes.windll.user32.SendInput(1, ctypes.pointer(x), ctypes.sizeof(x))
+
+# Monkey Patch InputController to use Direct Input if on Windows
+if HAS_PYNPUT and hasattr(ctypes, 'windll'):
+    print("[+] Enhanced DirectInput (ctypes) Enabled")
+    
+    # Add VK mapping helper
+    # Maps Qt key codes to Windows VK Codes
+    def qt_to_vk(key_code):
+        # Basic ASCII
+        if 32 <= key_code <= 126:
+            # Uppercase ASCII matches VK for A-Z and 0-9
+            c = chr(key_code).upper()
+            return ord(c)
+        
+        # Special Keys map
+        qt_vk_map = {
+            16777216: 0x1B, # Esc
+            16777217: 0x09, # Tab
+            16777219: 0x08, # Backspace
+            16777220: 0x0D, # Enter
+            16777221: 0x0D, # Enter Num
+            16777248: 0x10, # Shift
+            16777249: 0x11, # Ctrl
+            16777251: 0x12, # Alt
+            16777235: 0x26, # Up
+            16777237: 0x28, # Down
+            16777234: 0x25, # Left
+            16777236: 0x27, # Right
+            16777223: 0x2E, # Delete
+        }
+        return qt_vk_map.get(key_code, 0)
+
+    # Override the method
+    original_press = InputController.press_key
+    
+    def press_key_enhanced(self, key_code, pressed):
+        vk = qt_to_vk(key_code)
+        if vk > 0:
+            try:
+                press_key_direct(vk, pressed)
+            except Exception as e:
+                print(f"[-] DirectInput Error: {e}")
+        else:
+            # Fallback to pynput
+            original_press(self, key_code, pressed)
+            
+    InputController.press_key = press_key_enhanced

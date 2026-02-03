@@ -99,6 +99,17 @@ class VideoCanvas(QLabel):
         key = e.key()
         self.input_signal.emit(('key', key, False))
 
+    def wheelEvent(self, e):
+        # Standard scroll step is 120
+        delta = e.angleDelta().y()
+        # Normalize to steps (e.g., 1 or -1) to fit in signed byte and match pynput expectation
+        steps = 0
+        if delta > 0: steps = 1
+        elif delta < 0: steps = -1
+        
+        if steps != 0:
+            self.input_signal.emit(('scroll', 0, steps))
+
 
 class KeyLogWidget(QFrame):
     """

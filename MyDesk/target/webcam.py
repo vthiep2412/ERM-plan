@@ -14,8 +14,31 @@ class WebcamStreamer:
         with self.lock:
             if self.running:
                 return True
+            
             try:
-                self.cap = cv2.VideoCapture(self.dev_index)
+                # Try finding a working camera (scan index 0 to 2)
+                found = False
+                for idx in range(3):
+                    try:
+                        print(f"[*] Trying Webcam Index {idx}...")
+                        # Try DirectShow first
+                        self.cap = cv2.VideoCapture(idx, cv2.CAP_DSHOW)
+                        if not self.cap.isOpened():
+                             # Fallback to default
+                             self.cap = cv2.VideoCapture(idx)
+                        
+                        if self.cap.isOpened():
+                            self.dev_index = idx # Save working index
+                            found = True
+                            print(f"[+] Webcam found at index {idx}")
+                            break
+                    except:
+                        continue
+                
+                if not found:
+                     print("[-] No working webcam found in indices 0-2")
+                     return False
+
                 self.cap.set(cv2.CAP_PROP_FRAME_WIDTH, 320)
                 self.cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 240)
                 self.cap.set(cv2.CAP_PROP_FPS, 15)

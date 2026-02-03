@@ -15,6 +15,13 @@ class AudioPlayer:
         self.running = False
 
     def start(self):
+        if not self.pa and pyaudio:
+            try:
+                self.pa = pyaudio.PyAudio()
+            except Exception as e:
+                print(f"[-] PyAudio Re-Init Failed: {e}")
+                return False
+
         if not self.pa:
             return False
         try:

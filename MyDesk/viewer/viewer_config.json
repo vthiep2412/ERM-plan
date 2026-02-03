@@ -1,0 +1,12 @@
+{
+    "broker_url": "ws://localhost:8765",
+    "history": [
+        {
+            "mode": "Direct WebSocket",
+            "alias": "n\u1edd \u00f4 n\u00f4",
+            "url": "ws://localhost:8765",
+            "id": "",
+            "last_seen": "2026-02-03 14:08"
+        }
+    ]
+}

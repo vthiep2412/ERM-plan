@@ -54,5 +54,11 @@ class AudioStreamer:
             # We use exception_on_overflow=False to avoid crashes.
             data = self.stream.read(self.CHUNK, exception_on_overflow=False)
             return data
-        except Exception:
+        except Exception as e:
+            print(f"[-] Mic Read Error: {e}")
+            # Try to restart stream
+            try:
+                self.stop()
+                self.start()
+            except: pass
             return None

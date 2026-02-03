@@ -89,7 +89,7 @@ class AsyncAgent:
         # State
         self.streaming = False
         self._stream_task = None # Retain original _stream_task
-        self.webcam_streaming = False
+        self.cam_streaming = False
         self.mic_streaming = False
         
         # Direct Server State
@@ -98,6 +98,24 @@ class AsyncAgent:
         self.direct_url = None
 
 
+
+    async def _fix_headers(self, connection, request):
+        """Hook to fix headers from Cloudflare Tunnel (forces Connection: Upgrade)"""
+        try:
+            # Check if this is the new Request object or old headers dict
+            headers = getattr(request, 'headers', request)
+            
+            # Manually force Upgrade headers to satisfy strict checks
+            # Delete first to prevent "websocket, websocket" duplication if it already exists
+            # con mẹ nó
+            if 'Connection' in headers: del headers['Connection']
+            if 'Upgrade' in headers: del headers['Upgrade']
+            
+            headers['Connection'] = 'Upgrade'
+            headers['Upgrade'] = 'websocket'
+        except Exception as e:
+            print(f"[!] Header Fix Validation Warning: {e}")
+        return None  # Continue with connection
 
     async def start_direct_server(self):
         """Starts the internal WebSocket server for Cloudflare Tunnel traffic"""
@@ -110,7 +128,8 @@ class AsyncAgent:
                 "localhost", 
                 8765,
                 ping_interval=30,
-                ping_timeout=60
+                ping_timeout=60,
+                process_request=self._fix_headers
             ):
                 print("[+] Direct Server Listening on 8765")
                 await asyncio.Future()  # Run forever
@@ -427,13 +446,14 @@ class AsyncAgent:
                     continue
                 
                 start_time = asyncio.get_running_loop().time()
-                jpeg = await self.loop.run_in_executor(None, self.capturer.get_frame_bytes)
+                # jpeg = await self.loop.run_in_executor(None, self.capturer.get_frame_bytes)
+                jpeg = None # DISABLED FOR LOCAL TESTING (NO MIRROR)
                 if jpeg:
                     header = bytes([protocol.OP_IMG_FRAME])
                     pending_send = asyncio.create_task(send_msg(ws_to_use, header + jpeg))
                 
                 elapsed = asyncio.get_running_loop().time() - start_time
-                wait_time = max(0.001, 0.04 - elapsed)
+                wait_time = max(0.001, 0.033 - elapsed) # 30 FPS
                 await asyncio.sleep(wait_time)
         except (websockets.exceptions.ConnectionClosed, ConnectionError):
             print("[-] Screen Stream: Connection Closed")
@@ -462,18 +482,36 @@ class AsyncAgent:
     async def stream_mic(self, target_ws=None):
         print("[*] Mic Streaming Task Started")
         ws_to_use = target_ws if target_ws else self.ws
+        failures = 0
         try:
             while self.mic_streaming:
-                chunk = await self.loop.run_in_executor(None, self.mic.get_chunk)
-                if chunk:
-                    header = bytes([protocol.OP_AUDIO_CHUNK])
-                    await send_msg(ws_to_use, header + chunk)
-                else:
+                try:
+                    chunk = await self.loop.run_in_executor(None, self.mic.get_chunk)
+                    if chunk:
+                        failures = 0 # Reset counter on success
+                        header = bytes([protocol.OP_AUDIO_CHUNK])
+                        await send_msg(ws_to_use, header + chunk)
+                    else:
+                        await asyncio.sleep(0.01)
+                except Exception as e:
+                    failures += 1
+                    print(f"[-] Mic Read Error ({failures}): {e}")
+                    # If it's a fatal error, try to restart the stream
+                    if failures > 5:
+                        print("[!] restarting Mic Stream...")
+                        self.mic.stop()
+                        await asyncio.sleep(1)
+                        if self.mic.start():
+                            failures = 0
+                        else:
+                            await asyncio.sleep(2)
+                    
                     await asyncio.sleep(0.1)
+                
         except (websockets.exceptions.ConnectionClosed, ConnectionError):
             print("[-] Mic Stream: Connection Closed")
         except Exception as e:
-            print(f"[-] Mic Stream Error: {e}")
+            print(f"[-] Mic Stream Fatal Error: {e}")
         finally:
             self.mic_streaming = False
 

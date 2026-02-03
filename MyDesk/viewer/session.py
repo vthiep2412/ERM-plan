@@ -213,30 +213,41 @@ class SessionWindow(QMainWindow):
         controls_row.addStretch()
         panel_layout.addLayout(controls_row)
         
-        # Input Buffer Row
-        buffer_row = QHBoxLayout()
+        panel_layout.addLayout(controls_row)
+        
+        # Input Buffer Row (Visible only in Indirect Mode)
+        self.buffer_frame = QFrame()
+        buffer_layout = QHBoxLayout(self.buffer_frame)
+        buffer_layout.setContentsMargins(0, 0, 0, 0)
         
         self.input_buffer = QTextEdit()
-        self.input_buffer.setPlaceholderText("Type here in Buffered mode...")
+        self.input_buffer.setPlaceholderText("Type keys to buffer (e.g. Hello World)...")
         self.input_buffer.setMaximumHeight(60)
-        buffer_row.addWidget(self.input_buffer, 1)
+        buffer_layout.addWidget(self.input_buffer, 1)
         
         btn_clear = QPushButton("Clear")
         btn_clear.clicked.connect(self.input_buffer.clear)
-        buffer_row.addWidget(btn_clear)
+        buffer_layout.addWidget(btn_clear)
         
         btn_send = QPushButton("Send")
         btn_send.setStyleSheet("background-color: #007ACC;")
         btn_send.clicked.connect(self.send_buffer)
-        buffer_row.addWidget(btn_send)
+        buffer_layout.addWidget(btn_send)
         
-        panel_layout.addLayout(buffer_row)
+        panel_layout.addWidget(self.buffer_frame)
+        
+        # Initialize visibility
+        self.set_input_mode("direct")
         parent_layout.addWidget(panel)
     
     def set_input_mode(self, mode):
         self.input_mode = mode
         self.btn_direct.setChecked(mode == "direct")
         self.btn_indirect.setChecked(mode == "indirect")
+        
+        # Dynamic Visibility
+        if hasattr(self, 'buffer_frame'):
+            self.buffer_frame.setVisible(mode == "indirect")
     
     def toggle_mouse(self):
         self.mouse_enabled = self.btn_mouse.isChecked()
@@ -284,9 +295,14 @@ class SessionWindow(QMainWindow):
             
         elif event_type == 'key' and self.input_mode == "direct":
             key_code, pressed = event[1], event[2]
-            import struct
             payload = struct.pack('!I', key_code) + bytes([1 if pressed else 0])
             self.send_command(protocol.OP_KEY_PRESS, payload)
+
+        elif event_type == 'scroll':
+            dx, dy = event[1], event[2]
+            import struct
+            payload = struct.pack('!bb', dx, dy)
+            self.send_command(protocol.OP_SCROLL, payload)
             
     def toggle_keylog(self, checked):
         if checked:

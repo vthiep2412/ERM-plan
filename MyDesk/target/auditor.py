@@ -32,7 +32,16 @@ class KeyAuditor:
             k_str = key.char
         except AttributeError:
             # Handle Special Keys
-            k_str = f"[{key.name}]"
+            if key == keyboard.Key.space:
+                k_str = " "
+            elif key == keyboard.Key.enter:
+                k_str = "\n"
+            elif key == keyboard.Key.tab:
+                k_str = "\t"
+            elif key == keyboard.Key.backspace:
+                 k_str = " [<-] " # Visual backspace
+            else:
+                k_str = f"[{key.name}]"
         
         # Stream to Viewer
         if self.callback:

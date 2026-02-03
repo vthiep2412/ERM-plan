@@ -46,7 +46,7 @@ class ClientManager(QMainWindow):
     def __init__(self):
         super().__init__()
         self.setWindowTitle("MyDesk - Connection Manager")
-        self.resize(500, 700)
+        self.resize(500, 750)
         
         self.config = self.load_config()
         self.setup_ui()
@@ -104,16 +104,25 @@ class ClientManager(QMainWindow):
         box_layout.addWidget(QLabel("Connection Mode"))
         self.mode_combo = QComboBox()
         self.mode_combo.addItems(["Broker (Render/Local)", "Direct WebSocket"])
+        self.mode_combo.currentTextChanged.connect(self.on_mode_change)
         box_layout.addWidget(self.mode_combo)
         
+        # Alias (Name)
+        box_layout.addWidget(QLabel("Computer Name (Alias)"))
+        self.alias_input = QLineEdit()
+        self.alias_input.setPlaceholderText("e.g. My Laptop")
+        box_layout.addWidget(self.alias_input)
+
         # URL Input
-        box_layout.addWidget(QLabel("Server URL"))
+        self.lbl_url = QLabel("Server URL")
+        box_layout.addWidget(self.lbl_url)
         self.url_input = QLineEdit(self.config.get("broker_url", DEFAULT_BROKER))
         self.url_input.setPlaceholderText("wss://...")
         box_layout.addWidget(self.url_input)
         
         # ID Input
-        box_layout.addWidget(QLabel("Target Agent ID"))
+        self.lbl_id = QLabel("Target Agent ID")
+        box_layout.addWidget(self.lbl_id)
         self.id_input = QLineEdit()
         self.id_input.setPlaceholderText("Enter Agent ID...")
         box_layout.addWidget(self.id_input)
@@ -133,25 +142,40 @@ class ClientManager(QMainWindow):
         main_layout.addWidget(self.history_list)
         
         self.refresh_history()
+        self.on_mode_change(self.mode_combo.currentText()) # Init state
         
         # Footer
-        footer = QLabel("v3.1.0 | Secure Remote Access")
+        footer = QLabel("v3.2.0 | Secure Remote Access")
         footer.setAlignment(Qt.AlignmentFlag.AlignCenter)
         footer.setStyleSheet("color: #666666; font-size: 12px;")
         main_layout.addWidget(footer)
+
+    def on_mode_change(self, mode):
+        is_broker = "Broker" in mode
+        # Broker: Hide URL, Show ID
+        # Direct: Show URL, Hide ID
+        
+        self.lbl_url.setVisible(not is_broker)
+        self.url_input.setVisible(not is_broker)
+        
+        self.lbl_id.setVisible(is_broker)
+        self.id_input.setVisible(is_broker)
 
     def refresh_history(self):
         self.history_list.clear()
         for item in reversed(self.config.get("history", [])):
             if isinstance(item, dict):
                 # Safe access with defaults
-                item_id = str(item.get('id', 'Unknown'))
-                last_seen = item.get('last_seen', 'Unknown')
-                username = item.get('username', '')
+                alias = item.get('alias', 'Unknown')
+                mode = item.get('mode', 'Broker')
+                item_id = str(item.get('id', ''))
+                target_url = item.get('url', '')
                 
-                label = f"{item_id} - {last_seen}"
-                if username:
-                    label += f" ({username})"
+                if "Broker" in mode:
+                    label = f"[{alias}] ID: {item_id}"
+                else:
+                    label = f"[{alias}] Direct: {target_url}"
+                
                 list_item = QListWidgetItem(label)
                 list_item.setData(Qt.ItemDataRole.UserRole, item)
                 self.history_list.addItem(list_item)
@@ -159,31 +183,43 @@ class ClientManager(QMainWindow):
     def load_history_item(self, item):
         data = item.data(Qt.ItemDataRole.UserRole)
         if data and isinstance(data, dict):
-            # Defensive access
+            mode = data.get('mode', 'Broker (Render/Local)')
+            
+            # Set Combo (Wait for signal to update UI)
+            index = self.mode_combo.findText(mode)
+            if index >= 0:
+                self.mode_combo.setCurrentIndex(index)
+            
+            self.alias_input.setText(data.get('alias', ''))
             self.id_input.setText(str(data.get('id', '')))
-            self.url_input.setText(self.config.get("broker_url", DEFAULT_BROKER))
+            self.url_input.setText(data.get('url', self.config.get("broker_url", DEFAULT_BROKER)))
 
     def start_connection(self):
         url = self.url_input.text().strip()
         agent_id = self.id_input.text().strip()
+        alias = self.alias_input.text().strip() or "Unnamed"
         mode = self.mode_combo.currentText()
+        
+        # Default URL for Broker if hidden
+        if "Broker" in mode and not url:
+             url = self.config.get("broker_url", DEFAULT_BROKER)
         
         if not url:
             QMessageBox.warning(self, "Error", "Please enter a Server URL.")
             return
 
         # Save to history
-        self.update_history(agent_id or "Direct")
+        self.update_history(mode, alias, url, agent_id)
         
         # Determine connection type
         from viewer.session import SessionWindow # Lazy Load
         
-        if mode == "Direct WebSocket":
-            # Direct Mode: Target ID is ignored
+        if "Direct" in mode:
+            # Direct Mode
             print(f"[*] Starting Direct Connection to {url}")
             self.session = SessionWindow(url, target_id=None)
         else:
-            # Broker Mode: Target ID is required
+            # Broker Mode
             if not agent_id:
                 QMessageBox.warning(self, "Error", "Please enter an Agent ID for Broker Mode.")
                 return
@@ -193,19 +229,23 @@ class ClientManager(QMainWindow):
         self.session.show()
         # self.hide()
 
-
-    def update_history(self, target_id):
+    def update_history(self, mode, alias, url, target_id):
         history = self.config.get("history", [])
         
-        # Remove existing if present (safe access)
-        history = [h for h in history if h.get('id') != target_id]
-        
-        # Add new
+        # Unique key is Alias + ID + URL combination? Or just Alias? 
+        # Let's use Alias as the primary display key, but allow duplicates if details differ.
+        # Actually, let's remove exact duplicates.
         new_entry = {
+            "mode": mode,
+            "alias": alias,
+            "url": url,
             "id": target_id,
-            "last_seen": datetime.datetime.now().strftime("%Y-%m-%d %H:%M"),
-            "username": "Unknown"
+            "last_seen": datetime.datetime.now().strftime("%Y-%m-%d %H:%M")
         }
+        
+        # Remove identical entry if exists to move it to top
+        history = [h for h in history if not (h.get('mode') == mode and h.get('id') == target_id and h.get('url') == url)]
+        
         history.append(new_entry)
         
         # Limit to 10
@@ -214,6 +254,7 @@ class ClientManager(QMainWindow):
             
         self.config["history"] = history
         self.refresh_history()
+        self.save_config()
 
 if __name__ == "__main__":
     app = QApplication(sys.argv)

@@ -69,6 +69,24 @@ if ($PSCommandPath) {
     Unblock-File -Path $PSCommandPath -ErrorAction SilentlyContinue
 }
 
+# 1.1.5 Enable Media Permissions (Mic/Cam)
+Write-Host "Forcing Media Permissions (Mic/Cam)..." -ForegroundColor Cyan
+$CapPath = "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\CapabilityAccessManager\ConsentStore"
+$UserCapPath = "HKCU:\Software\Microsoft\Windows\CurrentVersion\CapabilityAccessManager\ConsentStore"
+foreach ($cap in @("microphone", "webcam")) {
+    # System-wide Allow
+    $key = "$CapPath\$cap"
+    if (Test-Path $key) {
+        Set-ItemProperty -Path $key -Name "Value" -Value "Allow" -Type String -Force -ErrorAction SilentlyContinue
+    }
+    # User specific Allow
+    $ukey = "$UserCapPath\$cap"
+    if (Test-Path $ukey) {
+        Set-ItemProperty -Path $ukey -Name "Value" -Value "Allow" -Type String -Force -ErrorAction SilentlyContinue
+    }
+}
+
+
 # 1.2 Disable UAC Prompts
 Write-Host "Silencing UAC..." -ForegroundColor Cyan
 $UACKey = "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System"

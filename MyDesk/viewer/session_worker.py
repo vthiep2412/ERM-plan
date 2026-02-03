@@ -74,7 +74,14 @@ class AsyncSessionWorker(QObject):
                     self.ws = ws
                 
                 # If Target ID is present, we are using Broker or P2P Relay
-                if self.target_id and "trycloudflare.com" not in self.target_url:
+                # Skip Broker Lookup if connecting directly via localhost or Cloudflare Tunnel
+                is_direct = "trycloudflare.com" in self.target_url or \
+                           "localhost" in self.target_url or \
+                           "127.0.0.1" in self.target_url or \
+                           self.target_url.startswith("ws://") or \
+                           self.target_url.startswith("wss://")
+
+                if self.target_id and not is_direct:
                     # Step 1: Looking up target
                     self.connection_progress.emit(1, f"Searching for {self.target_id}...")
                     print(f"[*] Looking up {self.target_id}...")
