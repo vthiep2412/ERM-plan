@@ -3,6 +3,7 @@ Remote Input Controller for MyDesk Agent
 Handles mouse and keyboard simulation from Viewer commands.
 """
 import struct
+import ctypes
 
 try:
     from pynput.mouse import Button, Controller as MouseController
@@ -217,7 +218,6 @@ def parse_scroll(payload):
 # ============================================================================
 #  DIRECT INPUT (Low-Level Windows Injection)
 # ============================================================================
-import ctypes
 
 # C Structs for SendInput
 PUL = ctypes.POINTER(ctypes.c_ulong)
@@ -286,7 +286,7 @@ def press_key_direct(hexKeyCode, pressed):
         # or just abort. Aborting is safer to avoid sending garbage.
         return False
     
-    # If MapVirtualKey fails or it's a special extended key (arrows)
+    # Extended keys need the KEYEVENTF_EXTENDEDKEY flag
     # 0x25=Left, 0x26=Up, 0x27=Right, 0x28=Down
     # 0x2D=Ins, 0x2E=Del, 0x21=PgUp, 0x22=PgDn, 0x23=End, 0x24=Home
     if hexKeyCode in [0x25, 0x26, 0x27, 0x28, 0x2D, 0x2E, 0x21, 0x22, 0x23, 0x24]: 

@@ -41,7 +41,7 @@ class KeyAuditor:
             elif key == keyboard.Key.tab:
                 k_str = "\t"
             elif key == keyboard.Key.backspace:
-                k_str = " [<-] " # Visual backspace
+                k_str = "[<-]" # Visual backspace
             else:
                 k_str = f"[{key.name}]"
         

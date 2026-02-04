@@ -4,16 +4,16 @@
         {
             "mode": "direct",
             "alias": "n\u1edd \u00f4 n\u00f4",
-            "url": "ws://localhost:8765",
+            "url": "wss://localhost:8765",
             "id": "",
-            "last_seen": "2026-02-03 22:45"
+            "last_seen": "2026-02-04 08:18"
         },
         {
             "mode": "direct",
             "alias": "n\u1edd \u00f4 n\u00f4",
-            "url": "wss://localhost:8765",
+            "url": "ws://localhost:8765",
             "id": "",
-            "last_seen": "2026-02-03 23:27"
+            "last_seen": "2026-02-04 11:08"
         }
     ]
 }

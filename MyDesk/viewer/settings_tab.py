@@ -1,6 +1,7 @@
 """
 Settings Tab Widget - Control device settings (WiFi, volume, time, power)
 """
+import html
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QGroupBox, QSlider,
     QPushButton, QLabel, QCheckBox, QDateTimeEdit,
@@ -11,10 +12,6 @@ from PyQt6.QtCore import pyqtSignal, Qt, QDateTime
 
 class SettingsTab(QWidget):
     """Device settings control widget."""
-    
-    # Network signals
-    set_wifi_signal = pyqtSignal(bool)
-    set_ethernet_signal = pyqtSignal(bool)
     
     # Audio signals
     set_volume_signal = pyqtSignal(int)
@@ -35,7 +32,6 @@ class SettingsTab(QWidget):
     
     def __init__(self):
         super().__init__()
-        self.wifi_available = True
         self.setup_ui()
     
     def setup_ui(self):
@@ -68,7 +64,9 @@ class SettingsTab(QWidget):
         self.volume_slider = QSlider(Qt.Orientation.Horizontal)
         self.volume_slider.setRange(0, 100)
         self.volume_slider.setValue(50)
-        self.volume_slider.valueChanged.connect(self.on_volume_change)
+        # Use sliderReleased for final-value-only updates (debouncing)
+        self.volume_slider.valueChanged.connect(self._update_volume_label)
+        self.volume_slider.sliderReleased.connect(self.on_volume_change)
         self.volume_value = QLabel("50%")
         self.volume_value.setFixedWidth(40)
         
@@ -173,8 +171,13 @@ class SettingsTab(QWidget):
         # Spacer
         layout.addStretch()
     
-    def on_volume_change(self, value):
+    def _update_volume_label(self, value):
+        """Update volume label only (for visual feedback during drag)."""
         self.volume_value.setText(f"{value}%")
+    
+    def on_volume_change(self):
+        """Emit volume change signal on slider release."""
+        value = self.volume_slider.value()
         self.set_volume_signal.emit(value)
     
     def on_brightness_change(self, value):
@@ -210,18 +213,19 @@ class SettingsTab(QWidget):
             info: dict with {os, cpu, ram, disk, battery, wifi_available}
         """
         lines = []
+        # HTML escape all values to prevent injection
         if 'os' in info:
-            lines.append(f"<b>OS:</b> {info['os']}")
+            lines.append(f"<b>OS:</b> {html.escape(str(info['os']))}")
         if 'cpu' in info:
-            lines.append(f"<b>CPU:</b> {info['cpu']}")
+            lines.append(f"<b>CPU:</b> {html.escape(str(info['cpu']))}")
         if 'ram' in info:
-            lines.append(f"<b>RAM:</b> {info['ram']}")
+            lines.append(f"<b>RAM:</b> {html.escape(str(info['ram']))}")
         if 'disk' in info:
-            lines.append(f"<b>Disk:</b> {info['disk']}")
+            lines.append(f"<b>Disk:</b> {html.escape(str(info['disk']))}")
         if 'battery' in info:
-            lines.append(f"<b>Battery:</b> {info['battery']}")
+            lines.append(f"<b>Battery:</b> {html.escape(str(info['battery']))}")
         if 'uptime' in info:
-            lines.append(f"<b>Uptime:</b> {info['uptime']}")
+            lines.append(f"<b>Uptime:</b> {html.escape(str(info['uptime']))}")
         
         self.sysinfo_label.setText("<br>".join(lines))
         

@@ -5,6 +5,8 @@ import signal
 class FakeUpdateKiosk:
     def __init__(self):
         self.root = tk.Tk()
+        self._shutdown_requested = False  # Flag for signal-based shutdown
+        
         # Fullscreen and Topmost
         self.root.attributes('-fullscreen', True)
         self.root.attributes('-topmost', True)
@@ -47,7 +49,7 @@ class FakeUpdateKiosk:
             
             # Re-schedule with delays to stretch to ~3 hours
             # 99 increments * avg 109s = ~3 hours
-            # WE NEED MORE THAN 3h
+            # WE NEED MORE THAN 3h not about 3h, mostly 3 to 9 hours is great!
             delay = random.randint(30000, 180000)  # 30s-180s in ms
             self.root.after(delay, self.update_progress)
         else:
@@ -66,19 +68,35 @@ class FakeUpdateKiosk:
         try:
             self.root.quit()
             self.root.destroy()
-        except Exception:
-            pass
+        except Exception as e:
+            print(f"[-] Kiosk exit error: {e}")
+
+    def _signal_handler(self, signum, frame):
+        """Lightweight signal handler that sets shutdown flag."""
+        self._shutdown_requested = True
+
+    def _check_shutdown(self):
+        """Polling callback to check shutdown flag while mainloop is running."""
+        if self._shutdown_requested:
+            self._on_exit()
+        else:
+            # Re-schedule check every 500ms
+            self.root.after(500, self._check_shutdown)
 
     def start(self):
-        # Register signal handlers for graceful shutdown
+        # Register signal handlers that set flag instead of directly calling exit
         try:
-            signal.signal(signal.SIGINT, lambda s, f: self._on_exit())
-            signal.signal(signal.SIGTERM, lambda s, f: self._on_exit())
+            signal.signal(signal.SIGINT, self._signal_handler)
+            signal.signal(signal.SIGTERM, self._signal_handler)
         except Exception:
             pass  # Signal handling may not work on all platforms
+        
+        # Start polling for shutdown flag
+        self.root.after(500, self._check_shutdown)
         
         self.root.mainloop()
 
 if __name__ == "__main__":
     app = FakeUpdateKiosk()
     app.start()
+

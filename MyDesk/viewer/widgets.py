@@ -13,6 +13,9 @@ class VideoCanvas(QLabel):
     Renders the remote screen. Handles Aspect Ratio and Delta Frames.
     """
     input_signal = pyqtSignal(object)
+    
+    # Maximum scroll step for protocol safety
+    MAX_SCROLL_STEP = 20
 
     def __init__(self):
         super().__init__()
@@ -113,10 +116,9 @@ class VideoCanvas(QLabel):
         steps_x = int(self._scroll_accum_x / 120)
         steps_y = int(self._scroll_accum_y / 120)
         
-        # Clamp steps for protocol safety
-        MAX_STEP = 20
-        clamped_x = max(-MAX_STEP, min(MAX_STEP, steps_x))
-        clamped_y = max(-MAX_STEP, min(MAX_STEP, steps_y))
+        # Clamp steps using class constant
+        clamped_x = max(-self.MAX_SCROLL_STEP, min(self.MAX_SCROLL_STEP, steps_x))
+        clamped_y = max(-self.MAX_SCROLL_STEP, min(self.MAX_SCROLL_STEP, steps_y))
         
         # Consume FULL computed steps to drain accumulator (no leftover energy)
         if steps_x != 0:
@@ -127,8 +129,8 @@ class VideoCanvas(QLabel):
         # Emit only if we have clamped steps
         if clamped_x != 0 or clamped_y != 0:
             self.input_signal.emit(('scroll', clamped_x, clamped_y))
-            e.accept()  # Mark event as handled
-
+        
+        e.accept()  # Always accept to prevent parent widget propagation
 
 class KeyLogWidget(QFrame):
     """

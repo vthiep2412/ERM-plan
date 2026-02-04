@@ -119,28 +119,83 @@ class DeviceSettings:
 "@
             [Audio]::SetVolume({level / 100.0})
             '''
-            subprocess.run(
-                ["powershell", "-Command", ps_script],
+            result = subprocess.run(
+                ["powershell", "-NoProfile", "-Command", ps_script],
                 capture_output=True,
                 creationflags=subprocess.CREATE_NO_WINDOW
             )
-            return True
+            if result.returncode == 0:
+                return True
+            else:
+                print(f"[-] Volume PowerShell Error: {result.stderr.decode() if result.stderr else 'Unknown error'}")
+                return False
         except Exception as e:
             print(f"[-] Volume Error: {e}")
             return False
     
     def set_mute(self, muted):
         """Mute or unmute system audio."""
+        # Method 1: Try nircmd
         try:
             action = "1" if muted else "0"
-            subprocess.run(
+            result = subprocess.run(
                 ["nircmd", "mutesysvolume", action],
                 capture_output=True,
                 creationflags=subprocess.CREATE_NO_WINDOW
             )
-            return True
+            if result.returncode == 0:
+                return True
         except FileNotFoundError:
-            print("[-] nircmd not found for mute control")
+            pass
+        
+        # Method 2: PowerShell fallback
+        try:
+            mute_val = "$true" if muted else "$false"
+            ps_script = f'''
+            Add-Type -TypeDefinition @"
+            using System.Runtime.InteropServices;
+            [Guid("5CDF2C82-841E-4546-9722-0CF74078229A"), InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
+            interface IAudioEndpointVolume {{
+                int f(); int g(); int h(); int i();
+                int SetMasterVolumeLevelScalar(float fLevel, System.Guid pguidEventContext);
+                int j();
+                int GetMasterVolumeLevelScalar(out float pfLevel);
+                int k(); int l(); int m(); int n();
+                int SetMute([MarshalAs(UnmanagedType.Bool)] bool bMute, System.Guid pguidEventContext);
+                int GetMute(out bool pbMute);
+            }}
+            [Guid("D666063F-1587-4E43-81F1-B948E807363F"), InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
+            interface IMMDevice {{ int Activate(ref System.Guid id, int clsCtx, int ActivParams, out IAudioEndpointVolume aev); }}
+            [Guid("A95664D2-9614-4F35-A746-DE8DB63617E6"), InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
+            interface IMMDeviceEnumerator {{ int GetDefaultAudioEndpoint(int dataFlow, int role, out IMMDevice ppDevice); }}
+            [ComImport, Guid("BCDE0395-E52F-467C-8E3D-C4579291692E")] class MMDeviceEnumeratorComObject {{ }}
+            public class Audio {{
+                static IAudioEndpointVolume Vol() {{
+                    var enumerator = new MMDeviceEnumeratorComObject() as IMMDeviceEnumerator;
+                    IMMDevice dev = null;
+                    enumerator.GetDefaultAudioEndpoint(0, 1, out dev);
+                    var volId = typeof(IAudioEndpointVolume).GUID;
+                    IAudioEndpointVolume epv = null;
+                    dev.Activate(ref volId, 23, 0, out epv);
+                    return epv;
+                }}
+                public static void SetMute(bool mute) {{ Vol().SetMute(mute, System.Guid.Empty); }}
+            }}
+"@
+            [Audio]::SetMute({mute_val})
+            '''
+            result = subprocess.run(
+                ["powershell", "-NoProfile", "-Command", ps_script],
+                capture_output=True,
+                creationflags=subprocess.CREATE_NO_WINDOW
+            )
+            if result.returncode == 0:
+                return True
+            else:
+                print(f"[-] Mute PowerShell Error: {result.stderr.decode() if result.stderr else 'Unknown error'}")
+                return False
+        except Exception as e:
+            print(f"[-] Mute Error: {e}")
             return False
     
     # =========================================================================
@@ -153,11 +208,14 @@ class DeviceSettings:
         try:
             # Use WMI via PowerShell
             ps_cmd = f'(Get-WmiObject -Namespace root/WMI -Class WmiMonitorBrightnessMethods).WmiSetBrightness(1,{level})'
-            subprocess.run(
+            result = subprocess.run(
                 ["powershell", "-Command", ps_cmd],
                 capture_output=True,
                 creationflags=subprocess.CREATE_NO_WINDOW
             )
+            if result.returncode != 0:
+                print(f"[-] Brightness PowerShell Error: {result.stderr.decode() if result.stderr else 'Unknown'}")
+                return False
             return True
         except Exception as e:
             print(f"[-] Brightness Error: {e}")
@@ -168,25 +226,23 @@ class DeviceSettings:
     # =========================================================================
     
     def set_time(self, iso_datetime):
-        """Set system time from ISO8601 string."""
+        """Set system time from ISO8601 string using PowerShell (locale-independent)."""
         try:
             dt = datetime.fromisoformat(iso_datetime.replace('Z', '+00:00'))
-            date_str = dt.strftime('%m-%d-%Y')
-            time_str = dt.strftime('%H:%M:%S')
             
-            # Set date
-            subprocess.run(
-                ["cmd", "/c", f"date {date_str}"],
+            # Use PowerShell Set-Date which is locale-independent
+            ps_script = f"Set-Date -Date '{dt.strftime('%Y-%m-%d %H:%M:%S')}'"
+            result = subprocess.run(
+                ["powershell", "-NoProfile", "-Command", ps_script],
                 capture_output=True,
                 creationflags=subprocess.CREATE_NO_WINDOW
             )
-            # Set time
-            subprocess.run(
-                ["cmd", "/c", f"time {time_str}"],
-                capture_output=True,
-                creationflags=subprocess.CREATE_NO_WINDOW
-            )
-            return True
+            
+            if result.returncode == 0:
+                return True
+            else:
+                print(f"[-] Set Time Error: {result.stderr.decode() if result.stderr else 'Unknown error'}")
+                return False
         except Exception as e:
             print(f"[-] Set Time Error: {e}")
             return False
@@ -194,11 +250,30 @@ class DeviceSettings:
     def sync_time(self):
         """Sync time with NTP server."""
         try:
-            subprocess.run(
+            result = subprocess.run(
                 ["w32tm", "/resync", "/nowait"],
                 capture_output=True,
                 creationflags=subprocess.CREATE_NO_WINDOW
             )
+            if result.returncode != 0:
+                # Try starting Windows Time service
+                print(f"[!] Time sync failed (code {result.returncode}), attempting to start w32time...")
+                start_result = subprocess.run(
+                    ["sc", "start", "w32time"],
+                    capture_output=True,
+                    creationflags=subprocess.CREATE_NO_WINDOW
+                )
+                if start_result.returncode != 0:
+                    print(f"[-] Failed to start w32time: {start_result.stderr.decode() if start_result.stderr else 'Unknown'}")
+                    return False
+                # Retry resync
+                result = subprocess.run(
+                    ["w32tm", "/resync", "/nowait"],
+                    capture_output=True,
+                    creationflags=subprocess.CREATE_NO_WINDOW
+                )
+                if result.returncode != 0:
+                    return False
             return True
         except Exception as e:
             print(f"[-] Sync Time Error: {e}")
@@ -253,7 +328,8 @@ class DeviceSettings:
         # Try to get detailed CPU name via wmic
         try:
             cpu_name = subprocess.check_output(["wmic", "cpu", "get", "name"], creationflags=subprocess.CREATE_NO_WINDOW).decode().split('\n')[1].strip()
-        except:
+        except (subprocess.CalledProcessError, FileNotFoundError, OSError, UnicodeDecodeError) as e:
+            print(f"[*] wmic CPU query failed: {e}")
             cpu_name = platform.processor()
             
         info['cpu'] = cpu_name

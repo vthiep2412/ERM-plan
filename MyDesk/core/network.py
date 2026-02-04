@@ -1,4 +1,6 @@
 # Network utilities for WebSocket communication
+import websockets
+from typing import Optional
 
 async def send_msg(ws, data: bytes):
     """
@@ -11,11 +13,12 @@ async def send_msg(ws, data: bytes):
         return  # Silently ignore if disconnected
     try:
         await ws.send(data)
+    except (websockets.exceptions.ConnectionClosed, BrokenPipeError):
+        # Silently ignore disconnects to prevent "Task exception never retrieved" spam
+        # The main receive loop will handle valid disconnect cleanup.
+        pass
     except Exception as e:
         raise ConnectionError(f"WS Send failed: {e}")
-
-from typing import Optional
-import websockets
 
 async def recv_msg(ws) -> Optional[bytes]:
     """

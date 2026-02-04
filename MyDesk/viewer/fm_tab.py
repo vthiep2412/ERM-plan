@@ -3,11 +3,15 @@ File Manager Tab Widget - Browse, download, upload, delete files
 """
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QTableWidget, QTableWidgetItem,
-    QPushButton, QHeaderView, QLineEdit, QFileDialog, QMessageBox, QMenu
+    QPushButton, QHeaderView, QLineEdit, QFileDialog, QMessageBox, QMenu, QComboBox, QInputDialog
 )
 from PyQt6.QtCore import pyqtSignal, Qt
 from PyQt6.QtGui import QAction
 import os
+import ntpath  # For remote Windows path operations
+
+# Maximum file size for upload (100MB default)
+MAX_UPLOAD_BYTES = 100 * 1024 * 1024
 
 
 class FMTab(QWidget):
@@ -54,6 +58,12 @@ class FMTab(QWidget):
         self.refresh_btn.setFixedWidth(40)
         self.refresh_btn.clicked.connect(self.refresh)
         
+        # Drive Selector
+        self.drives_combo = QComboBox()
+        self.drives_combo.setFixedWidth(60)
+        self.drives_combo.currentIndexChanged.connect(self.on_drive_change)
+        
+        path_bar.addWidget(self.drives_combo)
         path_bar.addWidget(self.up_btn)
         path_bar.addWidget(self.path_input, 1)
         path_bar.addWidget(self.go_btn)
@@ -114,9 +124,23 @@ class FMTab(QWidget):
                 padding: 4px;
                 border: 1px solid #3c3c3c;
             }
+            QComboBox {
+                background-color: #2d2d2d;
+                color: #d4d4d4;
+                border: 1px solid #3c3c3c;
+                padding: 4px;
+            }
         """)
         
         layout.addWidget(self.table, 1)
+
+    def on_drive_change(self, index):
+        drive = self.drives_combo.currentText()
+        if drive and drive != self.current_path:
+            # Just navigate to the drive root
+            self.current_path = drive
+            self.path_input.setText(drive)
+            self.list_signal.emit(drive)
     
     def navigate_to_path(self):
         path = self.path_input.text().strip()
@@ -125,6 +149,9 @@ class FMTab(QWidget):
             self.list_signal.emit(path)
     
     def go_up(self):
+        # Use ntpath for Windows remote paths
+        remote_path = ntpath
+        
         # Handle Windows root
         if len(self.current_path) <= 3 and ":" in self.current_path:
             # At drive root (e.g. C:\), go to drive list
@@ -133,7 +160,10 @@ class FMTab(QWidget):
             self.list_signal.emit("")
             return
 
-        parent = os.path.dirname(self.current_path.rstrip("\\"))
+        # Strip trailing separator consistently
+        stripped = self.current_path.rstrip("\\/")
+        parent = remote_path.dirname(stripped)
+        
         if parent:
             self.current_path = parent
             self.path_input.setText(parent)
@@ -154,8 +184,13 @@ class FMTab(QWidget):
         
         if type_item and name_item:
             if type_item.text() == "📁 Folder":
-                # Navigate into folder
-                new_path = os.path.join(self.current_path, name_item.text())
+                # Navigate into folder - use ntpath for Windows remotes
+                # Handle drive entries at root (empty current_path)
+                if not self.current_path or self.current_path == "":
+                    # At root, name is the full drive path like "C:\"
+                    new_path = name_item.text()
+                else:
+                    new_path = ntpath.join(self.current_path, name_item.text())
                 self.current_path = new_path
                 self.path_input.setText(new_path)
                 self.list_signal.emit(new_path)
@@ -181,8 +216,18 @@ class FMTab(QWidget):
         
         row = selected[0].row()
         name_item = self.table.item(row, 0)
+        type_item = self.table.item(row, 1)
         if name_item:
-            file_path = os.path.join(self.current_path, name_item.text())
+            # Use ntpath for Windows remote paths
+            file_path = ntpath.join(self.current_path, name_item.text())
+            # Check if it's a folder
+            is_dir = type_item and type_item.text() == "📁 Folder"
+            if is_dir:
+                QMessageBox.information(
+                    self, "Download", 
+                    "Folder download not yet supported.\nPlease download individual files."
+                )
+                return
             self.download_signal.emit(file_path)
     
     def delete_selected(self):
@@ -193,7 +238,8 @@ class FMTab(QWidget):
         row = selected[0].row()
         name_item = self.table.item(row, 0)
         if name_item:
-            file_path = os.path.join(self.current_path, name_item.text())
+            # Use ntpath for Windows remote paths
+            file_path = ntpath.join(self.current_path, name_item.text())
             
             reply = QMessageBox.question(
                 self, "Confirm Delete",
@@ -208,18 +254,33 @@ class FMTab(QWidget):
         file_path, _ = QFileDialog.getOpenFileName(self, "Select File to Upload")
         if file_path:
             try:
+                # Check file size before loading into memory
+                file_size = os.path.getsize(file_path)
+                if file_size > MAX_UPLOAD_BYTES:
+                    size_mb = file_size / (1024 * 1024)
+                    limit_mb = MAX_UPLOAD_BYTES / (1024 * 1024)
+                    reply = QMessageBox.warning(
+                        self, "Large File Warning",
+                        f"File is {size_mb:.1f} MB which exceeds the {limit_mb:.0f} MB limit.\n\n"
+                        f"Large files may cause memory issues. Continue anyway?",
+                        QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+                    )
+                    if reply != QMessageBox.StandardButton.Yes:
+                        return
+                
                 with open(file_path, 'rb') as f:
                     data = f.read()
-                remote_path = os.path.join(self.current_path, os.path.basename(file_path))
+                # Use ntpath for Windows remote path construction
+                remote_path = ntpath.join(self.current_path, os.path.basename(file_path))
                 self.upload_signal.emit(remote_path, data)
             except Exception as e:
                 QMessageBox.critical(self, "Upload Error", f"Failed to read file: {e}")
     
     def create_folder(self):
-        from PyQt6.QtWidgets import QInputDialog
         name, ok = QInputDialog.getText(self, "New Folder", "Folder name:")
         if ok and name:
-            folder_path = os.path.join(self.current_path, name)
+            # Use ntpath for Windows remote path construction
+            folder_path = ntpath.join(self.current_path, name)
             self.mkdir_signal.emit(folder_path)
     
     def update_data(self, files, path=None):
@@ -233,6 +294,16 @@ class FMTab(QWidget):
             self.current_path = path
             self.path_input.setText(path)
         
+        # Populate drives if we are at root listing (path is empty)
+        if not path:
+            self.drives_combo.blockSignals(True)
+            self.drives_combo.clear()
+            for file in files:
+                name = file.get('name', '')
+                if ":" in name and len(name) <= 3:  # Simple drive check
+                    self.drives_combo.addItem(name)
+            self.drives_combo.blockSignals(False)
+
         self.table.setRowCount(len(files))
         
         for row, file in enumerate(files):

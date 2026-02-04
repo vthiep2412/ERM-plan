@@ -2,6 +2,7 @@
 File Manager - Browse, read, write, delete files
 """
 import os
+import sys
 import json
 import shutil
 from datetime import datetime
@@ -9,6 +10,49 @@ from datetime import datetime
 
 class FileManager:
     """Handles file system operations."""
+    
+    # Dangerous paths that should never be deleted
+    FORBIDDEN_PATHS = frozenset([
+        '/', 'C:\\', 'C:\\Windows', 'C:\\Windows\\System32',
+        'C:\\Program Files', 'C:\\Program Files (x86)',
+        '/usr', '/bin', '/sbin', '/etc', '/var', '/root'
+    ])
+    
+    def __init__(self, base_dir=None):
+        """Initialize with optional base directory restriction.
+        
+        Args:
+            base_dir: Optional base directory to restrict all operations to.
+                      If None, allows access to entire filesystem (admin mode).
+        """
+        self.base_dir = os.path.realpath(base_dir) if base_dir else None
+    
+    def _is_safe_path(self, path):
+        """Check if path is safe (inside base_dir if set).
+        
+        Args:
+            path: Path to validate
+            
+        Returns:
+            bool: True if safe, False if potentially malicious
+        """
+        if not path:
+            return True  # Empty path is allowed (returns drives)
+        
+        try:
+            # Normalize and resolve
+            real_path = os.path.realpath(os.path.normpath(path))
+            
+            # If base_dir is set, ensure path is under it
+            if self.base_dir:
+                common = os.path.commonpath([self.base_dir, real_path])
+                if common != self.base_dir:
+                    print(f"[-] Path traversal blocked: {path}")
+                    return False
+            
+            return True
+        except Exception:
+            return False
     
     def list_dir(self, path):
         """List directory contents or available drives if path is empty.
@@ -19,23 +63,50 @@ class FileManager:
         Returns:
             List of dicts with {name, is_dir, size, modified}
         """
+        # Sanitize path
+        if path:
+            path = os.path.normpath(path)
+            
+            # Validate path safety
+            if not self._is_safe_path(path):
+                return []
+        
         if not path:
-            # List available drives
-            import string
-            from ctypes import windll
-            drives = []
-            bitmask = windll.kernel32.GetLogicalDrives()
-            for letter in string.ascii_uppercase:
-                if bitmask & 1:
-                    drive_name = f"{letter}:\\"
-                    drives.append({
-                        'name': drive_name,
-                        'is_dir': True,
-                        'size': 0,
-                        'modified': 'N/A'
-                    })
-                bitmask >>= 1
-            return drives
+            # List available drives (cross-platform)
+            if sys.platform == 'win32':
+                # Windows: use GetLogicalDrives
+                import string
+                from ctypes import windll
+                drives = []
+                bitmask = windll.kernel32.GetLogicalDrives()
+                for letter in string.ascii_uppercase:
+                    if bitmask & 1:
+                        drive_name = f"{letter}:\\"
+                        drives.append({
+                            'name': drive_name,
+                            'is_dir': True,
+                            'size': 0,
+                            'modified': 'N/A'
+                        })
+                    bitmask >>= 1
+                return drives
+            else:
+                # POSIX: list root mounts
+                try:
+                    # Try psutil if available
+                    import psutil
+                    drives = []
+                    for part in psutil.disk_partitions():
+                        drives.append({
+                            'name': part.mountpoint,
+                            'is_dir': True,
+                            'size': 0,
+                            'modified': 'N/A'
+                        })
+                    return drives if drives else [{'name': '/', 'is_dir': True, 'size': 0, 'modified': 'N/A'}]
+                except ImportError:
+                    # Fallback: just return root
+                    return [{'name': '/', 'is_dir': True, 'size': 0, 'modified': 'N/A'}]
 
         if not os.path.exists(path):
             return []
@@ -91,16 +162,29 @@ class FileManager:
         except Exception as e:
             print(f"[-] Read File Error: {e}")
     
-    def read_file_full(self, path):
+    # Alias for compatibility
+    def read_file_chunks(self, path, chunk_size=64*1024):
+        """Alias for read_file."""
+        return self.read_file(path, chunk_size)
+    
+    def read_file_full(self, path, size_limit=None):
         """Read entire file.
         
         Args:
             path: File path
+            size_limit: Optional maximum file size in bytes. If exceeded, returns None.
             
         Returns:
             bytes or None
         """
         try:
+            # Check file size first if limit specified
+            if size_limit is not None:
+                file_size = os.path.getsize(path)
+                if file_size > size_limit:
+                    print(f"[-] File too large: {file_size} bytes > {size_limit} limit")
+                    return None
+            
             with open(path, 'rb') as f:
                 return f.read()
         except Exception as e:
@@ -118,10 +202,10 @@ class FileManager:
             bool: Success
         """
         try:
-            # Create parent directories if needed
+            # Create parent directories if needed (TOCTOU safe)
             parent = os.path.dirname(path)
-            if parent and not os.path.exists(parent):
-                os.makedirs(parent)
+            if parent:
+                os.makedirs(parent, exist_ok=True)
             
             with open(path, 'wb') as f:
                 f.write(data)
@@ -130,20 +214,55 @@ class FileManager:
             print(f"[-] Write File Error: {e}")
             return False
     
-    def delete(self, path):
-        """Delete file or directory.
+    def delete(self, path, confirm_recursive=True):
+        """Delete file or directory with safety checks.
         
         Args:
             path: Path to delete
+            confirm_recursive: Must be True for directory deletes (safety)
             
         Returns:
             bool: Success
         """
         try:
-            if os.path.isdir(path):
-                shutil.rmtree(path)
+            # Validate path
+            if not path:
+                print("[-] Delete Error: Empty path")
+                return False
+            
+            # Resolve to real absolute path
+            real_path = os.path.realpath(os.path.normpath(path))
+            
+            # Check against forbidden paths
+            if real_path in self.FORBIDDEN_PATHS or real_path.rstrip('/\\') in self.FORBIDDEN_PATHS:
+                print(f"[-] Delete blocked: Cannot delete system path: {real_path}")
+                return False
+            
+            # Check if path is a root drive
+            if sys.platform == 'win32':
+                if len(real_path) <= 3 and real_path[1:3] in (':\\', ':'):
+                    print(f"[-] Delete blocked: Cannot delete drive root: {real_path}")
+                    return False
             else:
-                os.remove(path)
+                if real_path == '/':
+                    print("[-] Delete blocked: Cannot delete root")
+                    return False
+            
+            # Check base_dir restriction
+            if self.base_dir:
+                common = os.path.commonpath([self.base_dir, real_path])
+                if common != self.base_dir:
+                    print(f"[-] Delete blocked: Path outside allowed directory: {real_path}")
+                    return False
+            
+            # Perform delete
+            if os.path.isdir(real_path):
+                if not confirm_recursive:
+                    print("[-] Delete Error: Recursive delete not confirmed")
+                    return False
+                shutil.rmtree(real_path)
+            else:
+                os.remove(real_path)
             return True
         except Exception as e:
             print(f"[-] Delete Error: {e}")
@@ -159,6 +278,7 @@ class FileManager:
             bool: Success
         """
         try:
+            # exist_ok=True handles TOCTOU race safely
             os.makedirs(path, exist_ok=True)
             return True
         except Exception as e:

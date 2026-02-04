@@ -54,24 +54,64 @@ if cv2:
 # Try ZSTD for faster compression
 HAS_ZSTD = False
 try:
-    import zstd
+    import zstd  # noqa: F401
     HAS_ZSTD = True
 except ImportError:
     try:
-        import zstandard as zstd
+        import zstandard as zstd  # noqa: F401
         HAS_ZSTD = True
     except ImportError:
         pass
 
 TILE_SIZE = 32  # 32x32 pixel tiles
 
+# Allowed capture formats
+ALLOWED_FORMATS = {'JPEG', 'WEBP', 'PNG', 'JXL'}
+ALLOWED_METHODS = {'mss', 'dxcam'}
+
 class DeltaScreenCapturer:
-    def __init__(self, quality=50, scale=0.9):
+    def __init__(self, quality=50, scale=0.9, method="mss", format="WEBP"):
         self.quality = quality
         self.scale = scale
-        self.use_mss = mss is not None
-        self.format = "WEBP" if not HAS_JXL else "JXL"
         
+        # Validate format
+        format_upper = format.upper()
+        if format_upper not in ALLOWED_FORMATS:
+            print(f"[!] Invalid format '{format}'. Allowed: {ALLOWED_FORMATS}. Defaulting to WEBP.")
+            format_upper = 'WEBP'
+        self.format = format_upper
+        
+        # Validate method
+        method_lower = method.lower()
+        if method_lower not in ALLOWED_METHODS:
+            print(f"[!] Invalid method '{method}'. Allowed: {ALLOWED_METHODS}. Defaulting to mss.")
+            method_lower = 'mss'
+        self.method = method_lower
+        
+        self.dxcam_instance = None
+        self.dxcam_active = False  # Separate flag for DXCam state
+        self.use_mss = True  # Default fallback
+        
+        # Method Selection
+        if self.method == "dxcam" and dxcam:
+            try:
+                # Initialize DXCam
+                print("[*] Initializing DXCam...")
+                self.dxcam_instance = dxcam.create(output_color="RGB")
+                self.dxcam_active = True
+                self.use_mss = False
+                print("[+] Capture: DXCam Active")
+            except Exception as e:
+                print(f"[-] DXCam Init Failed: {e}. Falling back to MSS.")
+                self.dxcam_active = False
+                self.use_mss = True
+        
+        if self.use_mss:
+            if mss:
+                print(f"[+] Capture: MSS Delta @ Q{quality}")
+            else:
+                print("[!] Capture: Pillow Fallback (MSS missing)")
+
         # Delta state
         self.prev_frame = None
         self.prev_hashes = {}  # tile_pos -> hash
@@ -81,19 +121,17 @@ class DeltaScreenCapturer:
         # GPU encoding
         self.use_gpu = HAS_GPU and cv2 is not None
         
-        if self.use_mss:
-            print(f"[+] Capture: MSS Delta @ Q{quality}")
         if self.use_gpu:
             print("[+] Encoding: GPU (NVENC)")
         else:
-            print("[+] Encoding: CPU")
+            print(f"[+] Encoding: CPU ({self.format})")
     
     def get_frame_bytes(self):
         """Get delta-encoded frame (or full keyframe)"""
         self.frame_count += 1
         
-        # Force keyframe periodically
-        force_keyframe = (self.frame_count % self.keyframe_interval == 0)
+        # Force keyframe periodically (reserved for future delta frame implementation)
+        _force_keyframe = (self.frame_count % self.keyframe_interval == 0)
         
         # Capture raw frame
         raw_frame = self._capture_raw()
@@ -129,19 +167,30 @@ class DeltaScreenCapturer:
     
     def _capture_raw(self):
         """Capture raw frame as numpy array"""
-        if self.use_mss:
+        # 1. DXCam
+        if self.dxcam_instance:
+            try:
+                img = self.dxcam_instance.grab()
+                if img is not None:
+                    return img
+            except Exception as e:
+                print(f"[-] DXCam Grab Error: {e}")
+
+        # 2. MSS
+        if self.use_mss and mss:
             try:
                 with mss.mss() as sct:
                     sct_img = sct.grab(sct.monitors[1])
-                    # Convert BGRA to RGB (MSS gives BGRA format)
+                    # MSS captures BGRA (4 channels): Blue, Green, Red, Alpha
                     img = np.frombuffer(sct_img.bgra, dtype=np.uint8)
+                    # Reshape to (height, width, 4) for BGRA channels
                     img = img.reshape((sct_img.height, sct_img.width, 4))
-                    # Swap BGR to RGB: [:,:,2] is R, [:,:,1] is G, [:,:,0] is B
-                    return img[:, :, [2, 1, 0]]  # BGR -> RGB
+                    # Convert BGRA to RGB: indices [2,1,0] select R,G,B, dropping Alpha
+                    return img[:, :, [2, 1, 0]]
             except Exception as e:
                 print(f"[-] MSS Error: {e}")
         
-        # Fallback to PIL
+        # 3. Fallback to PIL
         try:
             from PIL import ImageGrab
             img = ImageGrab.grab()
@@ -231,6 +280,8 @@ class DeltaScreenCapturer:
                     img.save(output, format="WEBP", quality=self.quality, method=4)
                 elif self.format == "JXL":
                     img.save(output, format="JXL", quality=self.quality)
+                elif self.format == "PNG":
+                    img.save(output, format="PNG", optimize=True)
                 else:
                     img.save(output, format="JPEG", quality=self.quality, optimize=True)
                 return output.getvalue()

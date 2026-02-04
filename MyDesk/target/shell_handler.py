@@ -3,9 +3,7 @@ Shell Handler - Execute commands in PowerShell or CMD (Persistent/Interactive)
 """
 import subprocess
 import threading
-import time
-import queue
-
+import os
 import psutil
 
 class ShellHandler:
@@ -25,6 +23,7 @@ class ShellHandler:
         self.current_shell = None
         self.running = False
         self._threads = []
+        self._cwd_buffer = ""  # Buffer for detecting __CWD__ markers
 
     def get_cwd(self):
         """Get current working directory of the shell process."""
@@ -45,28 +44,32 @@ class ShellHandler:
         
         try:
             if shell_type == "ps":
-                # FIX: Inject prompt hack to emit CWD events for instant updates
-                # We print a special marker that the reader thread will intercept
-                hack = "function prompt { Write-Host \"`n__CWD__$pwd\"; 'PS> ' }"
+                # Returns: "__CWD__C:\Path\nPS C:\Path> "
+                hack = 'function prompt { "__CWD__" + $pwd.ProviderPath + "`nPS " + $pwd.ProviderPath + "> " }'
                 args = ["powershell", "-NoLogo", "-NoExit", "-Command", hack]
             else:
-                # CMD prompt hack: emit CWD marker
-                args = ["cmd", "/k", "prompt __CWD__$P$_$G"]
+                # CMD prompt hack: emit CWD marker then path prompt
+                # $P = Path, $G = >
+                args = ["cmd", "/k", "prompt __CWD__$P$_$P$G"]
             
-            self.process = subprocess.Popen(
-                args,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-                stdin=subprocess.PIPE,
-                text=True,
-                bufsize=0, # Unbuffered
-                creationflags=subprocess.CREATE_NO_WINDOW
-            )
+            # Cross-platform Popen: only use CREATE_NO_WINDOW on Windows
+            popen_kwargs = {
+                'stdout': subprocess.PIPE,
+                'stderr': subprocess.STDOUT,  # Merge stderr into stdout
+                'stdin': subprocess.PIPE,
+                'text': True,
+                'bufsize': 1,  # Line-buffered (text=True requires bufsize >= 1)
+            }
             
-            # Start reader threads
+            # Only add creationflags on Windows
+            if os.name == 'nt':
+                popen_kwargs['creationflags'] = getattr(subprocess, 'CREATE_NO_WINDOW', 0)
+            
+            self.process = subprocess.Popen(args, **popen_kwargs)
+            
+            # Start reader thread (Subject to merged stream)
             t1 = threading.Thread(target=self._read_stream, args=(self.process.stdout, "stdout"), daemon=True)
-            t2 = threading.Thread(target=self._read_stream, args=(self.process.stderr, "stderr"), daemon=True)
-            self._threads = [t1, t2]
+            self._threads = [t1]
             for t in self._threads:
                 t.start()
                 
@@ -80,9 +83,9 @@ class ShellHandler:
     def write_input(self, cmd):
         """Write command to shell stdin."""
         if not self.process or not self.running:
-             # Auto-start if not running (defaulting to ps/cmd based on what might be reasonable or just failing)
-             # But better to let agent handle start. Here we just error or start default.
-             return
+            # Auto-start if not running (defaulting to ps/cmd based on what might be reasonable or just failing)
+            # But better to let agent handle start. Here we just error or start default.
+            return
 
         try:
             if cmd:
@@ -96,29 +99,67 @@ class ShellHandler:
         """Read stdout/stderr in background thread."""
         try:
             while self.running and self.process:
-                # Revert to readline() as requested (read(1) caused issues)
-                line = stream.readline()
-                if not line:
+                # Use read(1) for instant character streaming (fixes prompt lag)
+                char = stream.read(1)
+                if not char:
+                    # EOF
                     break
                 
-                clean_line = line.rstrip('\r\n')
+                # Add to CWD buffer for marker detection
+                self._cwd_buffer += char
                 
-                # Check for CWD marker
-                if "__CWD__" in clean_line:
-                    try:
-                        new_cwd = clean_line.split("__CWD__")[1].strip()
-                        if self.on_cwd:
-                            self.on_cwd(new_cwd)
-                        continue # Don't show marker in output
-                    except Exception:
-                        pass
-
-                if self.on_output:
-                    self.on_output(clean_line)
+                # Check for complete __CWD__ marker pattern
+                if "__CWD__" in self._cwd_buffer:
+                    # Look for the complete marker (ends at newline)
+                    marker_start = self._cwd_buffer.find("__CWD__")
+                    newline_pos = self._cwd_buffer.find("\n", marker_start)
                     
+                    if newline_pos != -1:
+                        # Extract the path from marker
+                        path = self._cwd_buffer[marker_start + 7:newline_pos]
+                        
+                        # Send text before marker to output
+                        text_before = self._cwd_buffer[:marker_start]
+                        if text_before and self.on_output:
+                            self.on_output(text_before)
+                        
+                        # Call on_cwd callback with extracted path
+                        if callable(self.on_cwd):
+                            try:
+                                self.on_cwd(path)
+                            except Exception:
+                                pass
+                        
+                        # Keep text after the marker line
+                        self._cwd_buffer = self._cwd_buffer[newline_pos + 1:]
+                        
+                        # Also send the normal prompt part to output (skip the __CWD__ line)
+                        continue
+                
+                # Flush buffer if it's getting too long without a marker
+                if len(self._cwd_buffer) > 500 and "__CWD__" not in self._cwd_buffer:
+                    if self.on_output:
+                        self.on_output(self._cwd_buffer)
+                    self._cwd_buffer = ""
+                elif not self._cwd_buffer.startswith("_") and len(self._cwd_buffer) > 0:
+                    # If buffer doesn't start with potential marker, flush immediate
+                    if "__CWD__"[:len(self._cwd_buffer)] != self._cwd_buffer:
+                        if self.on_output:
+                            self.on_output(self._cwd_buffer)
+                        self._cwd_buffer = ""
+                    
+        except (EOFError, BrokenPipeError, OSError) as e:
+            # Expected stream closure errors
+            print(f"[*] Shell stream closed: {type(e).__name__}")
         except Exception as e:
-            pass # Stream closed
+            # Unexpected errors
+            print(f"[-] Shell stream handler error: {e}")
         finally:
+            # Flush any remaining buffer
+            if self._cwd_buffer and self.on_output:
+                self.on_output(self._cwd_buffer)
+                self._cwd_buffer = ""
+            
             if self.process and self.process.poll() is not None and self.running:
                 # Process exited unexpectedly
                 self.running = False
@@ -131,7 +172,14 @@ class ShellHandler:
         if self.process:
             try:
                 self.process.terminate()
-            except:
-                pass
+                # Wait briefly for graceful exit
+                try:
+                    self.process.wait(timeout=1)
+                except subprocess.TimeoutExpired:
+                    print("[!] Shell did not terminate, killing...")
+                    self.process.kill()
+            except Exception as e:
+                print(f"[-] Shell stop error: {e}")
             self.process = None
         self.current_shell = None
+        self._cwd_buffer = ""

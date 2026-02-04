@@ -21,6 +21,7 @@ class AudioStreamer:
         # Reset restart counter only for fresh start (not internal restart)
         if reset_restart_counter:
             self._restart_attempts = 0
+            self._last_restart_time = time.time()
         try:
             self.stream = self.pa.open(format=self.FORMAT,
                                        channels=self.CHANNELS,
@@ -60,8 +61,6 @@ class AudioStreamer:
             self._restart_attempts = 0  # Reset on success
             return data
         except Exception as e:
-            print(f"[-] Mic Read Error: {e}")
-            
             # Restart Backoff Logic
             now = time.time()
             cooldown_seconds = 1.0
@@ -69,8 +68,12 @@ class AudioStreamer:
             
             # Check cooldown
             if now - self._last_restart_time < cooldown_seconds:
+                remaining = cooldown_seconds - (now - self._last_restart_time)
+                print(f"[*] Mic cooldown active, {remaining:.2f}s remaining")
                 return None  # Still in cooldown
             
+            print(f"[-] Mic Read Error: {e}")
+
             # Check max attempts
             if self._restart_attempts >= max_attempts:
                 print(f"[-] Mic Max Restart Attempts ({max_attempts}) Reached. Giving up.")

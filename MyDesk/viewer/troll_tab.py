@@ -1,12 +1,16 @@
 """
 Troll Tab Widget - Fun pranks and visual/audio effects
 """
+import os
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QGroupBox, 
     QPushButton, QLineEdit, QCheckBox,
-    QFileDialog
+    QFileDialog, QMessageBox
 )
 from PyQt6.QtCore import pyqtSignal, Qt
+
+# Maximum video file size for upload (50MB)
+MAX_VIDEO_BYTES = 50 * 1024 * 1024
 
 
 class TrollTab(QWidget):
@@ -178,6 +182,10 @@ class TrollTab(QWidget):
         # Spacer
         layout.addStretch()
     
+    def show_error_message(self, msg):
+        """Show error message in a dialog."""
+        QMessageBox.critical(self, "Error", msg)
+    
     def open_url(self):
         url = self.url_input.text().strip()
         if url:
@@ -201,7 +209,7 @@ class TrollTab(QWidget):
                     data = f.read()
                 self.play_sound_signal.emit(data)
             except Exception as e:
-                print(f"Error reading audio file: {e}")
+                self.show_error_message(f"Error reading audio file:\n{file_path}\n\n{e}")
     
     def pick_and_send_video(self):
         file_path, _ = QFileDialog.getOpenFileName(
@@ -210,11 +218,22 @@ class TrollTab(QWidget):
         )
         if file_path:
             try:
+                # Check file size before loading
+                file_size = os.path.getsize(file_path)
+                if file_size > MAX_VIDEO_BYTES:
+                    size_mb = file_size / (1024 * 1024)
+                    limit_mb = MAX_VIDEO_BYTES / (1024 * 1024)
+                    self.show_error_message(
+                        f"Video file is too large ({size_mb:.1f} MB).\n\n"
+                        f"Maximum allowed size is {limit_mb:.0f} MB."
+                    )
+                    return
+                
                 with open(file_path, 'rb') as f:
                     data = f.read()
                 self.play_video_signal.emit(data)
             except Exception as e:
-                print(f"Error reading video file: {e}")
+                self.show_error_message(f"Error reading video file:\n{file_path}\n\n{e}")
     
     def pick_and_send_wallpaper(self):
         file_path, _ = QFileDialog.getOpenFileName(
@@ -227,7 +246,7 @@ class TrollTab(QWidget):
                     data = f.read()
                 self.wallpaper_signal.emit(data)
             except Exception as e:
-                print(f"Error reading image file: {e}")
+                self.show_error_message(f"Error reading image file:\n{file_path}\n\n{e}")
     
     def stop_all(self):
         """Stop all active trolls and uncheck all toggles."""

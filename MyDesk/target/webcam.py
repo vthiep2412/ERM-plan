@@ -8,83 +8,98 @@ class WebcamStreamer:
         self.cap = None
         self.running = False
         self.lock = threading.Lock()
+        self._starting = False
+        self._cancel_start = False
 
     def start(self):
-        # Quick check with lock
+        # Quick check with lock to prevent concurrent starts
         with self.lock:
-            if self.running:
-                return True
+            if self.running or self._starting:
+                return False  # Return False when already running/starting to avoid misleading callers
+            self._starting = True
+            self._cancel_start = False
         
-        # Camera discovery WITHOUT holding lock (allows stop() to be called)
-        temp_cap = None
-        found_idx = None
-        
-        for idx in range(3):
-            try:
-                print(f"[*] Trying Webcam Index {idx}...")
-                # Try DirectShow first
-                temp_cap = cv2.VideoCapture(idx, cv2.CAP_DSHOW)
-                if not temp_cap.isOpened():
-                    # Fallback to default
-                    temp_cap.release()
-                    temp_cap = cv2.VideoCapture(idx)
-                
-                if temp_cap.isOpened():
-                    found_idx = idx
-                    print(f"[+] Webcam found at index {idx}")
-                    break
-                else:
-                    temp_cap.release()
-                    temp_cap = None
-            except Exception as e:
-                print(f"[-] Webcam Error: {e}")
-                if temp_cap is not None:
-                    try:
-                        temp_cap.release()
-                    except Exception as release_err:
-                        print(f"[-] Webcam Release Error: {release_err}")
-                temp_cap = None
-                continue
-        
-        if not temp_cap or found_idx is None:
-            print("[-] No working webcam found in indices 0-2")
-            return False
-        
-        # Configure camera
         try:
-            temp_cap.set(cv2.CAP_PROP_FRAME_WIDTH, 320)
-            temp_cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 240)
-            temp_cap.set(cv2.CAP_PROP_FPS, 15)
+            # Camera discovery (@ NO LOCK to allow concurrent stop)
+            temp_cap = None
+            found_idx = None
             
-            if not temp_cap.isOpened():
-                print("[-] Webcam closed unexpectedly after set()")
-                temp_cap.release()
-                return False
-        except Exception as e:
-            print(f"[-] Webcam Config Error: {e}")
-            try:
-                temp_cap.release()
-            except Exception:
-                pass
-            return False
-        
-        # Acquire lock to set state
-        with self.lock:
-            # Check if stop() was called while we were discovering
-            if self.cap is not None:
+            for idx in range(3):
                 try:
-                    self.cap.release()
+                    print(f"[*] Trying Webcam Index {idx}...")
+                    # Try DirectShow first
+                    temp_cap = cv2.VideoCapture(idx, cv2.CAP_DSHOW)
+                    if not temp_cap.isOpened():
+                        # Fallback to default
+                        temp_cap.release()
+                        temp_cap = cv2.VideoCapture(idx)
+                    
+                    if temp_cap.isOpened():
+                        found_idx = idx
+                        print(f"[+] Webcam found at index {idx}")
+                        break
+                    else:
+                        temp_cap.release()
+                        temp_cap = None
+                except Exception as e:
+                    print(f"[-] Webcam Error: {e}")
+                    if temp_cap is not None:
+                        try:
+                            temp_cap.release()
+                        except Exception as release_err:
+                            print(f"[-] Webcam Release Error: {release_err}")
+                    temp_cap = None
+                    continue
+            
+            if not temp_cap or found_idx is None:
+                print("[-] No working webcam found in indices 0-2")
+                return False
+            
+            # Configure camera
+            try:
+                temp_cap.set(cv2.CAP_PROP_FRAME_WIDTH, 320)
+                temp_cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 240)
+                temp_cap.set(cv2.CAP_PROP_FPS, 15)
+                
+                if not temp_cap.isOpened():
+                    print("[-] Webcam closed unexpectedly after set()")
+                    temp_cap.release()
+                    return False
+            except Exception as e:
+                print(f"[-] Webcam Config Error: {e}")
+                try:
+                    temp_cap.release()
                 except Exception:
                     pass
+                return False
             
-            self.cap = temp_cap
-            self.dev_index = found_idx
-            self.running = True
-            print("[+] Webcam Started")
-            return True
+            # Acquire lock to set state
+            with self.lock:
+                # Check for cancellation before committing
+                if self._cancel_start:
+                    print("[!] Webcam start cancelled by stop()")
+                    if temp_cap: temp_cap.release()
+                    return False
+
+                # Release any stale capture from a previous start()
+                if self.cap is not None:
+                    try:
+                        self.cap.release()
+                    except Exception:
+                        pass
+                
+                self.cap = temp_cap
+                self.dev_index = found_idx
+                self.running = True
+                print("[+] Webcam Started")
+                return True
+        finally:
+            with self.lock:
+                self._starting = False
 
     def stop(self):
         with self.lock:
+            self._cancel_start = True # Signal any pending start to abort
             self.running = False
             if self.cap:
                 try:

@@ -72,9 +72,6 @@ class BSODScreen:
             # Slow progress to make it realistic
             delay = 500 if self.progress < 30 else 1000 if self.progress < 70 else 2000
             self.root.after(delay, self.update_progress)
-        else:
-            # Stay at 100%
-            self.progress_label.config(text="100% complete")
     
     def _on_exit(self):
         """Graceful exit."""

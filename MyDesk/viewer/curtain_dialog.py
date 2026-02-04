@@ -35,8 +35,6 @@ class CurtainDialog(QDialog):
             QPushButton#blackBtn:hover { border-color: #007ACC; }
             QPushButton#fakeBtn { 
                 background-color: #006dae; 
-                color: white; 
-                border-radius: 5px; 
                 font-weight: bold; 
             }
             QPushButton#fakeBtn:hover { background-color: #0088dd; }

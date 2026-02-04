@@ -175,7 +175,7 @@ class ClientManager(QMainWindow):
                 # Safe access with defaults
                 alias = item.get('alias', 'Unknown')
                 mode_key = item.get('mode', self.MODE_BROKER)
-                item_id = str(item.get('id', ''))
+                item_id = str(item.get('id') or '')
                 target_url = item.get('url', '')
                 
                 # Check for legacy "Broker" strings or new "broker" key
@@ -209,7 +209,7 @@ class ClientManager(QMainWindow):
                 self.mode_combo.setCurrentIndex(0) # Default
             
             self.alias_input.setText(data.get('alias', ''))
-            self.id_input.setText(str(data.get('id', '')))
+            self.id_input.setText(str(data.get('id') or ''))
             self.url_input.setText(data.get('url', self.config.get("broker_url", DEFAULT_BROKER)))
 
     def start_connection(self):
