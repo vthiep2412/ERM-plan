@@ -65,6 +65,12 @@
 - [ ] Agent crash → viewer shows disconnect
 - [ ] Invalid URL → error message
 - [ ] Device error → warning (no disconnect)
+- [ ] Large File Upload (>100MB) → Blocked with warning
+
+## ⚙️ Device Controls
+- [ ] WiFi/Ethernet toggle
+- [ ] Volume/Mute/Brightness
+- [ ] Power Actions (Sleep/Lock) - Use with caution!
 
 ---
 

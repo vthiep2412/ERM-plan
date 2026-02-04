@@ -14,7 +14,7 @@ from PyQt6.QtCore import Qt, pyqtSignal, QSize
 CURTAIN_DIR = os.path.join(os.path.expanduser("~"), ".mydesk", "curtains")
 
 class CurtainDialog(QDialog):
-    curtain_selected = pyqtSignal(str, object)  # type ("BLACK" or "IMAGE"), data (None or path)
+    curtain_selected = pyqtSignal(str, object) # type ("BLACK", "IMAGE", or "FAKE_UPDATE"), data (None or path)
     
     def __init__(self, parent=None):
         super().__init__(parent)

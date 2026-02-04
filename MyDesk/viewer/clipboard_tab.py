@@ -288,7 +288,11 @@ class ClipboardTab(QWidget):
         self.rebuild_history_ui()
     
     def add_entry(self, entry):
-        """Add new real-time clipboard entry."""
+        """Add new real-time clipboard entry.
+        
+        Args:
+            entry: dict with 'text' and 'timestamp' keys
+        """
         # Add to front of history (newest first)
         self.history.append(entry)
         self.rebuild_history_ui()
@@ -317,8 +321,11 @@ class ClipboardTab(QWidget):
         """Handle delete button click."""
         self.delete_entry_signal.emit(index)
     
-    def update_content(self, text):
+    def update_content(self, content):
         """Update with current clipboard content (legacy compatibility)."""
+        # Handle both string (legacy) and dict (new)
+        text = content.get('text', '') if isinstance(content, dict) else str(content)
+        
         # Just add to history display
         if text and (not self.history or self.history[-1].get('text') != text):
             self.history.append({'text': text, 'timestamp': ''})

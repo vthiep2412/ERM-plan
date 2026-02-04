@@ -141,9 +141,12 @@ class ShellHandler:
                     if self.on_output:
                         self.on_output(self._cwd_buffer)
                     self._cwd_buffer = ""
-                elif not self._cwd_buffer.startswith("_") and len(self._cwd_buffer) > 0:
+                elif len(self._cwd_buffer) > 0:
                     # If buffer doesn't start with potential marker, flush immediate
-                    if "__CWD__"[:len(self._cwd_buffer)] != self._cwd_buffer:
+                    # Optimized: Check if buffer matches the START of marker
+                    marker_prefix = "__CWD__"[:len(self._cwd_buffer)]
+                    if self._cwd_buffer != marker_prefix:
+                        # It's not the start of a marker, so it's safe to flush
                         if self.on_output:
                             self.on_output(self._cwd_buffer)
                         self._cwd_buffer = ""

@@ -15,10 +15,15 @@ def main():
         print(f"[-] Unsafe Export Path: {DEST_DIR}. Aborting.")
         return
 
+    dest_abs = os.path.abspath(DEST_DIR)
+    if os.path.basename(dest_abs) != "MyDesk_Broker_Deploy":
+        print(f"[-] Safety Abort: Destination folder name must be 'MyDesk_Broker_Deploy', got '{os.path.basename(dest_abs)}'")
+        return
+
     if os.path.exists(DEST_DIR):
-        # Optional: Ask for confirmation? Or just be safe it's the right folder name.
-        if "MyDesk_Broker_Deploy" not in DEST_DIR:
-            print("[-] Precautionary Abort: Target folder name mismatch.")
+        confirm = input(f"[?] Delete existing folder '{DEST_DIR}'? (y/N): ")
+        if confirm.lower() != 'y':
+            print("[-] Aborted by user.")
             return
         shutil.rmtree(DEST_DIR)
     os.makedirs(DEST_DIR)

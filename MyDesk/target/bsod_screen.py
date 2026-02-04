@@ -71,12 +71,15 @@ class BSODScreen:
             self.progress_label.config(text=f"{self.progress}% complete")
             # Slow progress to make it realistic
             delay = 500 if self.progress < 30 else 1000 if self.progress < 70 else 2000
-            self.root.after(delay, self.update_progress)
+            delay = 500 if self.progress < 30 else 1000 if self.progress < 70 else 2000
+            self._after_id = self.root.after(delay, self.update_progress)
     
     def _on_exit(self):
         """Graceful exit."""
         print("[*] BSOD exit triggered")
         try:
+            if hasattr(self, '_after_id'):
+                self.root.after_cancel(self._after_id)
             self.root.quit()
             self.root.destroy()
         except Exception:

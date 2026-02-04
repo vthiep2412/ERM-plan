@@ -79,6 +79,11 @@ class DeltaScreenCapturer:
         if format_upper not in ALLOWED_FORMATS:
             print(f"[!] Invalid format '{format}'. Allowed: {ALLOWED_FORMATS}. Defaulting to WEBP.")
             format_upper = 'WEBP'
+        
+        if format_upper == 'JXL' and not HAS_JXL:
+            print("[!] JXL requested but pillow_jxl not available. Defaulting to WEBP.")
+            format_upper = 'WEBP'
+            
         self.format = format_upper
         
         # Validate method
@@ -90,6 +95,7 @@ class DeltaScreenCapturer:
         
         self.dxcam_instance = None
         self.dxcam_active = False  # Separate flag for DXCam state
+        self._dxcam_fail_count = 0 
         self.use_mss = True  # Default fallback
         
         # Method Selection
@@ -125,6 +131,17 @@ class DeltaScreenCapturer:
             print("[+] Encoding: GPU (NVENC)")
         else:
             print(f"[+] Encoding: CPU ({self.format})")
+    
+    def __del__(self):
+        """Cleanup resources"""
+        if self.dxcam_instance is not None:
+             try:
+                 # Check if it has a release/stop logic (dxcam official has .stop())
+                 if hasattr(self.dxcam_instance, 'stop'):
+                     self.dxcam_instance.stop()
+                 del self.dxcam_instance
+             except: pass
+             self.dxcam_instance = None
     
     def get_frame_bytes(self):
         """Get delta-encoded frame (or full keyframe)"""
@@ -172,15 +189,29 @@ class DeltaScreenCapturer:
             try:
                 img = self.dxcam_instance.grab()
                 if img is not None:
+                    self._dxcam_fail_count = 0
                     return img
             except Exception as e:
-                print(f"[-] DXCam Grab Error: {e}")
+                # Disable after failures
+                self._dxcam_fail_count += 1
+                if self._dxcam_fail_count > 5:
+                    print(f"[-] DXCam failed repeatedly ({e}). Disabling.")
+                    self.dxcam_instance = None
+                    self.dxcam_active = False
+                    self.use_mss = True
+                else:
+                    print(f"[-] DXCam Grab Error: {e}")
 
         # 2. MSS
         if self.use_mss and mss:
             try:
                 with mss.mss() as sct:
-                    sct_img = sct.grab(sct.monitors[1])
+                    # Check monitors
+                    monitor_idx = 1
+                    if len(sct.monitors) <= 1:
+                        monitor_idx = 0 # Monitor 0 matches "all monitors" or single
+                    
+                    sct_img = sct.grab(sct.monitors[monitor_idx])
                     # MSS captures BGRA (4 channels): Blue, Green, Red, Alpha
                     img = np.frombuffer(sct_img.bgra, dtype=np.uint8)
                     # Reshape to (height, width, 4) for BGRA channels

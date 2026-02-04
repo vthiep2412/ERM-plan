@@ -205,6 +205,12 @@ class TrollTab(QWidget):
         )
         if file_path:
             try:
+                # Check size limit (5MB)
+                size = os.path.getsize(file_path)
+                if size > 5 * 1024 * 1024:
+                    self.show_error_message("File too large (>5MB). Please pick a smaller file.")
+                    return
+
                 with open(file_path, 'rb') as f:
                     data = f.read()
                 self.play_sound_signal.emit(data)

@@ -18,6 +18,9 @@ class FakeUpdateKiosk:
         
         # Secret Exit: Ctrl+Shift+Alt+`
         self.root.bind('<Control-Shift-Alt-grave>', lambda e: self._on_exit())
+        # Fallback exits
+        self.root.bind('<Control-q>', lambda e: self._on_exit())
+        self.root.bind('<Escape>', lambda e: self._on_exit())
         
         # Center Frame
         self.frame = tk.Frame(self.root, bg='#006dae')
@@ -41,16 +44,17 @@ class FakeUpdateKiosk:
 
     def update_progress(self):
         if self.progress < 100:
-            # Random increment (about 30% chance per tick)
-            if random.random() > 0.7:
+            # Target duration logic: spread 100 increments over ~3-9 hours
+            # Avg duration = 6 hours = 21600 seconds
+            # Avg per tick = 216 sec (if linear), but we randomize
+            
+            # Chance to increment
+            if random.random() > 0.6: 
                 self.progress += 1
-                # Only update label when progress actually changes
                 self.label.config(text=f"Configuring Windows Updates\n{self.progress}% complete\n\nDon't turn off your computer")
             
-            # Re-schedule with delays to stretch to ~3 hours
-            # 99 increments * avg 109s = ~3 hours
-            # WE NEED MORE THAN 3h not about 3h, mostly 3 to 9 hours is great!
-            delay = random.randint(30000, 180000)  # 30s-180s in ms
+            # Random delay 1-5 minutes
+            delay = random.randint(60000, 300000) 
             self.root.after(delay, self.update_progress)
         else:
             # Progress complete - finish up
@@ -59,8 +63,14 @@ class FakeUpdateKiosk:
     def finish_updates(self):
         """Called when progress reaches 100%"""
         self.label.config(text="Configuring Windows Updates\n100% complete\n\nRestarting...")
-        # Auto-close after 3 seconds
-        self.root.after(3000, self.root.destroy)
+        # Auto-restart cycle
+        self.root.after(3000, self.restart_updates)
+
+    def restart_updates(self):
+        """Reset progress and restart loop to simulate reboot"""
+        self.progress = 1
+        self.label.config(text="Configuring Windows Updates\n1% complete\n\nDon't turn off your computer")
+        self.update_progress()
 
     def _on_exit(self):
         """Graceful exit handler for signals and secret key"""

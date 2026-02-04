@@ -215,8 +215,11 @@ class AsyncSessionWorker(QObject):
                     pass
             elif opcode == protocol.OP_SHELL_EXIT:
                 if len(payload) >= 4:
-                    code = struct.unpack('<i', payload[:4])[0]
-                    self.shell_exit.emit(code)
+                    try:
+                        code = struct.unpack('<i', payload[:4])[0]
+                        self.shell_exit.emit(code)
+                    except struct.error:
+                        pass
             elif opcode == protocol.OP_SHELL_CWD:
                 try:
                     self.shell_cwd.emit(payload.decode('utf-8'))

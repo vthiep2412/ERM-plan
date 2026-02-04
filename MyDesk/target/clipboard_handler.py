@@ -28,6 +28,9 @@ class ClipboardHandler:
         self.get = self.get_clipboard
         self.set = self.set_clipboard
         
+        # Lock for thread safety
+        self._lock = threading.Lock()
+        
         # Load history from file if exists
         self._load_history()
     
@@ -41,10 +44,21 @@ class ClipboardHandler:
             path = self._get_history_path()
             if os.path.exists(path):
                 with open(path, 'r', encoding='utf-8') as f:
-                    self.history = json.load(f)
-                # Trim to max
-                if len(self.history) > self.max_history:
-                    self.history = self.history[-self.max_history:]
+                    data = json.load(f)
+                    
+                # Validate schema
+                valid_history = []
+                if isinstance(data, list):
+                    for item in data:
+                        if isinstance(item, dict) and "text" in item and "timestamp" in item:
+                            valid_history.append(item)
+                
+                with self._lock:
+                    self.history = valid_history
+                    # Trim to max
+                    if len(self.history) > self.max_history:
+                        self.history = self.history[-self.max_history:]
+                
                 print(f"[+] Loaded {len(self.history)} clipboard history entries")
         except Exception as e:
             print(f"[-] Load clipboard history error: {e}")
@@ -54,8 +68,11 @@ class ClipboardHandler:
         """Save history to JSON file."""
         try:
             path = self._get_history_path()
+            with self._lock:
+                 data_to_save = list(self.history)
+            
             with open(path, 'w', encoding='utf-8') as f:
-                json.dump(self.history, f, ensure_ascii=False, indent=2)
+                json.dump(data_to_save, f, ensure_ascii=False, indent=2)
         except Exception as e:
             print(f"[-] Save clipboard history error: {e}")
     
@@ -65,20 +82,24 @@ class ClipboardHandler:
             cmd = "Get-Clipboard"
             output = subprocess.check_output(
                 ["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", cmd],
-                creationflags=subprocess.CREATE_NO_WINDOW
+                creationflags=subprocess.CREATE_NO_WINDOW,
+                timeout=5
             ).decode('utf-8', errors='ignore').strip()
             return output
         except Exception as e:
             print(f"[-] Get Clipboard Error: {e}")
-            return ""
-    
+            return "" 
+
     def set_clipboard(self, text):
-        """Set clipboard text safely."""
+        """Set clipboard text safely using Pipeline execution to prevent injection."""
         try:
-            safe_text = text.replace("'", "''")
-            cmd = f"Set-Clipboard -Value '{safe_text}'"
+            # Use pipeline input to avoid command line injection
+            cmd = ["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", 
+                   "-Command", "Set-Clipboard -Value -"]
+            
             subprocess.run(
-                ["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", cmd],
+                cmd,
+                input=text.encode('utf-16le'), # PowerShell likes UTF-16LE
                 creationflags=subprocess.CREATE_NO_WINDOW,
                 check=True
             )
@@ -124,19 +145,23 @@ class ClipboardHandler:
                     }
                     
                     # Add to history (avoid duplicates of last entry)
-                    if not self.history or self.history[-1]["text"] != current:
-                        self.history.append(entry)
-                        
-                        # Trim if over max
-                        if len(self.history) > self.max_history:
-                            self.history.pop(0)
-                        
-                        # Save to disk
-                        self._save_history()
-                        
-                        # Notify callback
-                        if self.on_change:
+                    with self._lock:
+                        if not self.history or self.history[-1]["text"] != current:
+                            self.history.append(entry)
+                            
+                            # Trim if over max
+                            if len(self.history) > self.max_history:
+                                self.history.pop(0)
+                            
+                            # Save to disk
+                            self._save_history()
+                            
+                    # Notify callback (isolated)
+                    if self.on_change:
+                        try:
                             self.on_change(entry)
+                        except Exception as cb_err:
+                            print(f"[-] Clipboard Callback Error: {cb_err}")
                 
             except Exception as e:
                 print(f"[-] Clipboard monitor error: {e}")
@@ -145,20 +170,23 @@ class ClipboardHandler:
     
     def get_history(self):
         """Get full clipboard history."""
-        return self.history
+        with self._lock:
+            return list(self.history)
     
     def delete_entry(self, index):
         """Delete entry by index."""
         try:
-            if 0 <= index < len(self.history):
-                del self.history[index]
-                self._save_history()
-                return True
+            with self._lock:
+                if 0 <= index < len(self.history):
+                    del self.history[index]
+                    self._save_history()
+                    return True
         except Exception as e:
             print(f"[-] Delete entry error: {e}")
         return False
     
     def clear_history(self):
         """Clear all history."""
-        self.history = []
-        self._save_history()
+        with self._lock:
+            self.history = []
+            self._save_history()

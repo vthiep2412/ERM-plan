@@ -121,10 +121,16 @@ class VideoCanvas(QLabel):
         clamped_y = max(-self.MAX_SCROLL_STEP, min(self.MAX_SCROLL_STEP, steps_y))
         
         # Consume FULL computed steps to drain accumulator (no leftover energy)
-        if steps_x != 0:
-            self._scroll_accum_x -= steps_x * 120
-        if steps_y != 0:
-            self._scroll_accum_y -= steps_y * 120
+        if clamped_x != 0:
+            self._scroll_accum_x -= clamped_x * 120
+        else:
+             # Decay if no step triggered (deadzone)
+             if abs(self._scroll_accum_x) < 30: self._scroll_accum_x = 0
+
+        if clamped_y != 0:
+            self._scroll_accum_y -= clamped_y * 120
+        else:
+             if abs(self._scroll_accum_y) < 30: self._scroll_accum_y = 0
         
         # Emit only if we have clamped steps
         if clamped_x != 0 or clamped_y != 0:

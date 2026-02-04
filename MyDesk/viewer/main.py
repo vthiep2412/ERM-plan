@@ -228,6 +228,11 @@ class ClientManager(QMainWindow):
             QMessageBox.warning(self, "Error", "Please enter a Server URL.")
             return
 
+        # Validate URL scheme
+        if not (url.startswith("ws://") or url.startswith("wss://")):
+             QMessageBox.warning(self, "Error", "URL must start with ws:// or wss://")
+             return
+
         # Broker Validation
         if is_broker and not agent_id:
             QMessageBox.warning(self, "Error", "Please enter an Agent ID for Broker Mode.")

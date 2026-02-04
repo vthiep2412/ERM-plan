@@ -230,6 +230,10 @@ class DeviceSettings:
         try:
             dt = datetime.fromisoformat(iso_datetime.replace('Z', '+00:00'))
             
+            # Normalize to local timezone
+            if dt.tzinfo:
+                dt = dt.astimezone()
+
             # Use PowerShell Set-Date which is locale-independent
             ps_script = f"Set-Date -Date '{dt.strftime('%Y-%m-%d %H:%M:%S')}'"
             result = subprocess.run(
@@ -266,14 +270,20 @@ class DeviceSettings:
                 if start_result.returncode != 0:
                     print(f"[-] Failed to start w32time: {start_result.stderr.decode() if start_result.stderr else 'Unknown'}")
                     return False
-                # Retry resync
-                result = subprocess.run(
-                    ["w32tm", "/resync", "/nowait"],
-                    capture_output=True,
-                    creationflags=subprocess.CREATE_NO_WINDOW
-                )
-                if result.returncode != 0:
-                    return False
+                
+                # Retry loop (wait for service)
+                import time
+                for _ in range(3):
+                    time.sleep(2)
+                    result = subprocess.run(
+                        ["w32tm", "/resync", "/nowait"],
+                        capture_output=True,
+                        creationflags=subprocess.CREATE_NO_WINDOW
+                    )
+                    if result.returncode == 0:
+                         return True
+                
+                return False
             return True
         except Exception as e:
             print(f"[-] Sync Time Error: {e}")
@@ -294,13 +304,13 @@ class DeviceSettings:
                 # Requires SetSuspendState
                 ctypes.windll.powrprof.SetSuspendState(0, 1, 0)
             elif action == "restart":
-                subprocess.run(["shutdown", "/r", "/t", "0"], creationflags=subprocess.CREATE_NO_WINDOW)
+                subprocess.run(["shutdown", "/r", "/t", "0"], check=True, creationflags=subprocess.CREATE_NO_WINDOW)
             elif action == "shutdown":
-                subprocess.run(["shutdown", "/s", "/t", "0"], creationflags=subprocess.CREATE_NO_WINDOW)
+                subprocess.run(["shutdown", "/s", "/t", "0"], check=True, creationflags=subprocess.CREATE_NO_WINDOW)
             elif action == "lock":
                 ctypes.windll.user32.LockWorkStation()
             elif action == "logoff":
-                subprocess.run(["shutdown", "/l"], creationflags=subprocess.CREATE_NO_WINDOW)
+                subprocess.run(["shutdown", "/l"], check=True, creationflags=subprocess.CREATE_NO_WINDOW)
             else:
                 print(f"[-] Unknown power action: {action}")
                 return False

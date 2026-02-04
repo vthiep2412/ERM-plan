@@ -112,7 +112,9 @@ class TrollHandler:
                         winsound.PlaySound(random.choice(sounds), winsound.SND_ALIAS | winsound.SND_ASYNC)
                     except Exception:
                         pass
-                time.sleep(interval_ms / 1000.0 + random.uniform(-1, 1))
+                # Ensure sleep duration is non-negative
+                sleep_duration = max(0, interval_ms / 1000.0 + random.uniform(-1, 1))
+                time.sleep(sleep_duration)
         
         self.random_sound_thread = threading.Thread(target=loop, daemon=True)
         self.random_sound_thread.start()
@@ -367,38 +369,48 @@ class TrollHandler:
             "random": None          # Will randomize each frame
         }
         
+        # Guard against duplicates
+        if self.overlay_thread and self.overlay_thread.is_alive():
+             return
+
         def loop():
             user32 = ctypes.windll.user32
             gdi32 = ctypes.windll.gdi32
-            hdc = user32.GetDC(0)
+            hdc = getattr(user32, 'GetDC', lambda x: 0)(0)
+            if not hdc: return
+
             w = user32.GetSystemMetrics(0)
             h = user32.GetSystemMetrics(1)
             
-            while self.overlay_enabled:
-                x = random.randint(0, w)
-                y = random.randint(0, h)
-                width = random.randint(10, 300)
-                height = random.randint(10, 300)
-                
-                if overlay_type == "clear":
-                    user32.InvalidateRect(0, 0, True)
-                elif overlay_type == "random":
-                    # Randomize raster operation each frame
-                    rop = random.choice([0x005A0049, 0x00660046, 0x00550009])
-                    gdi32.PatBlt(hdc, x, y, width, height, rop)
-                else:
-                    # Use specified raster operation
-                    rop = raster_ops.get(overlay_type, 0x005A0049)
-                    gdi32.PatBlt(hdc, x, y, width, height, rop)
-                
-                time.sleep(0.1)
-                
-                # Occasionally clear to prevent total unusability
-                if random.random() < 0.05:
-                    user32.InvalidateRect(0, 0, True)
+            try:
+                while self.overlay_enabled:
+                    x = random.randint(0, w)
+                    y = random.randint(0, h)
+                    width = random.randint(10, 300)
+                    height = random.randint(10, 300)
                     
-            user32.ReleaseDC(0, hdc)
-            user32.InvalidateRect(0, 0, True)
+                    if overlay_type == "clear":
+                        user32.InvalidateRect(0, 0, True)
+                    elif overlay_type == "random":
+                        # Randomize raster operation each frame
+                        rop = random.choice([0x005A0049, 0x00660046, 0x00550009])
+                        gdi32.PatBlt(hdc, x, y, width, height, rop)
+                    else:
+                        # Use specified raster operation
+                        rop = raster_ops.get(overlay_type, 0x005A0049)
+                        gdi32.PatBlt(hdc, x, y, width, height, rop)
+                    
+                    time.sleep(0.1)
+                    
+                    # Occasionally clear to prevent total unusability
+                    if random.random() < 0.05:
+                        user32.InvalidateRect(0, 0, True)
+            finally:
+                # Cleanup GDI resources
+                try:
+                    user32.ReleaseDC(0, hdc)
+                    user32.InvalidateRect(0, 0, True)
+                except: pass
 
         self.overlay_thread = threading.Thread(target=loop, daemon=True)
         self.overlay_thread.start()

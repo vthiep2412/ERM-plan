@@ -89,8 +89,8 @@ class ProcessManager:
         
         try:
             proc = psutil.Process(pid)
-            proc.terminate()
-            proc.wait(timeout=3)
+            proc.kill() # Use kill() generally for immediate effect
+            proc.wait(timeout=5)
             return True
         except psutil.NoSuchProcess:
             print(f"[-] Process {pid} not found")
@@ -98,14 +98,7 @@ class ProcessManager:
         except psutil.AccessDenied:
             print(f"[-] Access denied to kill process {pid}")
             return False
-        except psutil.TimeoutExpired:
-            # Force kill
-            try:
-                proc.kill()
-                return True
-            except Exception:
-                return False
-        except Exception as e:
+        except (psutil.TimeoutExpired, Exception) as e:
             print(f"[-] Kill Process Error: {e}")
             return False
     

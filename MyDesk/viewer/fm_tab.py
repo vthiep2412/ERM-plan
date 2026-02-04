@@ -259,14 +259,13 @@ class FMTab(QWidget):
                 if file_size > MAX_UPLOAD_BYTES:
                     size_mb = file_size / (1024 * 1024)
                     limit_mb = MAX_UPLOAD_BYTES / (1024 * 1024)
-                    reply = QMessageBox.warning(
-                        self, "Large File Warning",
-                        f"File is {size_mb:.1f} MB which exceeds the {limit_mb:.0f} MB limit.\n\n"
-                        f"Large files may cause memory issues. Continue anyway?",
-                        QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+                    QMessageBox.warning(
+                        self, "Upload Limit Exceeded",
+                        f"File is {size_mb:.1f} MB which exceeds the {limit_mb:.0f} MB hard limit.\n"
+                        "Preventing upload to avoid memory exhaustion.",
+                        QMessageBox.StandardButton.Ok
                     )
-                    if reply != QMessageBox.StandardButton.Yes:
-                        return
+                    return
                 
                 with open(file_path, 'rb') as f:
                     data = f.read()

@@ -2,7 +2,7 @@
 import websockets
 from typing import Optional
 
-async def send_msg(ws, data: bytes):
+async def send_msg(ws: websockets.WebSocketClientProtocol | None, data: bytes):
     """
     Sends a message via WebSocket.
     With WebSockets, we don't strictly need length-prefixing as messages are framed,

@@ -18,10 +18,10 @@ class AudioStreamer:
 
     def start(self, reset_restart_counter=True):
         if not self.pa or self.running: return False
-        # Reset restart counter only for fresh start (not internal restart)
+        # Reset restart counter only for fresh start
         if reset_restart_counter:
             self._restart_attempts = 0
-            self._last_restart_time = time.time()
+            self._last_restart_time = 0 # Allow immediate restart on first fail
         try:
             self.stream = self.pa.open(format=self.FORMAT,
                                        channels=self.CHANNELS,

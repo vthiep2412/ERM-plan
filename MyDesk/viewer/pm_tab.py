@@ -141,8 +141,10 @@ class PMTab(QWidget):
         Args:
             processes: List of dicts with {pid, name, cpu, mem}
         """
+        self.table.setSortingEnabled(False) # Disable sorting during update
         self.last_processes = processes
         self.filter_processes()
+        self.table.setSortingEnabled(True) # Re-enable sorting
 
     def filter_processes(self):
         """Filter and display processes based on search text."""

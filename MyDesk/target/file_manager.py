@@ -12,7 +12,9 @@ class FileManager:
     """Handles file system operations."""
     
     # Dangerous paths that should never be deleted
-    FORBIDDEN_PATHS = frozenset([
+    # Use frozen set of normalized paths
+    FORBIDDEN_PATHS = frozenset(
+        os.path.normcase(os.path.normpath(p)) for p in [
         '/', 'C:\\', 'C:\\Windows', 'C:\\Windows\\System32',
         'C:\\Program Files', 'C:\\Program Files (x86)',
         '/usr', '/bin', '/sbin', '/etc', '/var', '/root'
@@ -45,8 +47,12 @@ class FileManager:
             
             # If base_dir is set, ensure path is under it
             if self.base_dir:
-                common = os.path.commonpath([self.base_dir, real_path])
-                if common != self.base_dir:
+                # Use strict prefix check instead of commonpath (simpler/faster)
+                base = os.path.normcase(self.base_dir)
+                target = os.path.normcase(real_path)
+                
+                # Must be equal or start with base_dir + sep
+                if not (target == base or target.startswith(base + os.sep)):
                     print(f"[-] Path traversal blocked: {path}")
                     return False
             
@@ -152,6 +158,9 @@ class FileManager:
         if not os.path.exists(path) or os.path.isdir(path):
             return
         
+        if not self._is_safe_path(path):
+            return
+        
         try:
             with open(path, 'rb') as f:
                 while True:
@@ -185,6 +194,9 @@ class FileManager:
                     print(f"[-] File too large: {file_size} bytes > {size_limit} limit")
                     return None
             
+            if not self._is_safe_path(path):
+                return None
+            
             with open(path, 'rb') as f:
                 return f.read()
         except Exception as e:
@@ -203,6 +215,9 @@ class FileManager:
         """
         try:
             # Create parent directories if needed (TOCTOU safe)
+            if not self._is_safe_path(path):
+                return False
+
             parent = os.path.dirname(path)
             if parent:
                 os.makedirs(parent, exist_ok=True)
@@ -232,9 +247,10 @@ class FileManager:
             
             # Resolve to real absolute path
             real_path = os.path.realpath(os.path.normpath(path))
+            norm_real_path = os.path.normcase(real_path)
             
             # Check against forbidden paths
-            if real_path in self.FORBIDDEN_PATHS or real_path.rstrip('/\\') in self.FORBIDDEN_PATHS:
+            if norm_real_path in self.FORBIDDEN_PATHS or os.path.normcase(real_path.rstrip('/\\')) in self.FORBIDDEN_PATHS:
                 print(f"[-] Delete blocked: Cannot delete system path: {real_path}")
                 return False
             
@@ -249,11 +265,9 @@ class FileManager:
                     return False
             
             # Check base_dir restriction
-            if self.base_dir:
-                common = os.path.commonpath([self.base_dir, real_path])
-                if common != self.base_dir:
-                    print(f"[-] Delete blocked: Path outside allowed directory: {real_path}")
-                    return False
+            if not self._is_safe_path(real_path):
+                 print(f"[-] Delete blocked: Path outside allowed directory: {real_path}")
+                 return False
             
             # Perform delete
             if os.path.isdir(real_path):
@@ -279,6 +293,8 @@ class FileManager:
         """
         try:
             # exist_ok=True handles TOCTOU race safely
+            if not self._is_safe_path(path):
+                return False
             os.makedirs(path, exist_ok=True)
             return True
         except Exception as e:

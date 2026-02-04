@@ -351,9 +351,9 @@ class SessionWindow(QMainWindow):
         if hasattr(self, 'buffer_frame'):
             self.buffer_frame.setVisible(mode == "indirect")
     
-    def toggle_input_block(self, checked):
-        self.input_blocked = checked
-        if checked:
+    def set_cursor_blocked(self, blocked):
+        """Set cursor to forbidden if blocked."""
+        if blocked:
             self.canvas.setCursor(Qt.CursorShape.ForbiddenCursor)
         else:
             self.canvas.setCursor(Qt.CursorShape.ArrowCursor)
