@@ -66,13 +66,13 @@ class AudioStreamer:
             cooldown_seconds = 1.0
             max_attempts = 5
             
+            print(f"[-] Mic Read Error: {e}")
+            
             # Check cooldown
             if now - self._last_restart_time < cooldown_seconds:
                 remaining = cooldown_seconds - (now - self._last_restart_time)
                 print(f"[*] Mic cooldown active, {remaining:.2f}s remaining")
                 return None  # Still in cooldown
-            
-            print(f"[-] Mic Read Error: {e}")
 
             # Check max attempts
             if self._restart_attempts >= max_attempts:

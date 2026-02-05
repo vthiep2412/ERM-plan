@@ -11,7 +11,7 @@ from PyQt6.QtCore import Qt
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
 DEFAULT_BROKER = "ws://localhost:8765"
-CONFIG_FILE = "viewer_config.json"
+CONFIG_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "viewer_config.json")
 
 def normalize_color(color):
     """Convert color to #RRGGBB format for stylesheet manipulation."""
@@ -68,7 +68,10 @@ class ClientManager(QMainWindow):
             with open(CONFIG_FILE, 'w') as f:
                 json.dump(self.config, f, indent=4)
         except Exception as e:
-            print(f"[!] Failed to save config: {e}")
+            print(f"[-] Failed to save config: {e}")
+            import traceback
+            traceback.print_exc()
+            QMessageBox.warning(self, "Config Error", f"Failed to save settings to {CONFIG_FILE}\n{e}")
 
     def setup_ui(self):
         # Dark Palette
@@ -230,27 +233,27 @@ class ClientManager(QMainWindow):
 
         # Validate URL scheme
         if not (url.startswith("ws://") or url.startswith("wss://")):
-             QMessageBox.warning(self, "Error", "URL must start with ws:// or wss://")
-             return
+            QMessageBox.warning(self, "Error", "URL must start with ws:// or wss://")
+            return
 
         # Broker Validation
         if is_broker and not agent_id:
             QMessageBox.warning(self, "Error", "Please enter an Agent ID for Broker Mode.")
             return
 
-        # Save to history
-        self.update_history(mode_key, alias, url, agent_id)
-        
         # Determine connection type
         from viewer.session import SessionWindow # Lazy Load
         
         if not is_broker:
             # Direct Mode
             print(f"[*] Starting Direct Connection to {url}")
+            # Ensure ID is empty in history for direct mode
+            self.update_history(mode_key, alias, url, "") 
             self.session = SessionWindow(url, target_id=None)
         else:
             # Broker Mode
             print(f"[*] Starting Broker Connection to {url} (Target: {agent_id})")
+            self.update_history(mode_key, alias, url, agent_id)
             self.session = SessionWindow(url, target_id=agent_id)
             
         self.session.show()
@@ -261,7 +264,7 @@ class ClientManager(QMainWindow):
         
         # Deduplicate history: Remove entry with same URL + ID to move it to top.
         # This way reconnecting to the same target updates its position and timestamp.
-        history = [h for h in history if not (h.get('url') == url and h.get('id') == target_id)]
+        history = [h for h in history if not (h.get('url') == url and (h.get('id') or "") == (target_id or ""))]
         
         new_entry = {
             "mode": mode,

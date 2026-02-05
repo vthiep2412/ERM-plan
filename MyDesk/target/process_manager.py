@@ -34,7 +34,7 @@ class ProcessManager:
                 try:
                     proc.cpu_percent(None)  # Initialize sampling
                     procs.append(proc)
-                except (psutil.NoSuchProcess, psutil.AccessDenied):
+                except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
                     continue
             
             # Short sleep to allow CPU sampling
@@ -53,7 +53,7 @@ class ProcessManager:
                         'cpu': cpu if cpu is not None else 0,
                         'mem': round(mem_mb, 1)
                     })
-                except (psutil.NoSuchProcess, psutil.AccessDenied):
+                except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
                     continue
         except Exception as e:
             print(f"[-] Process List Error: {e}")

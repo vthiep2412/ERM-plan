@@ -64,9 +64,16 @@ class SettingsTab(QWidget):
         self.volume_slider = QSlider(Qt.Orientation.Horizontal)
         self.volume_slider.setRange(0, 100)
         self.volume_slider.setValue(50)
-        # Use sliderReleased for final-value-only updates (debouncing)
-        self.volume_slider.valueChanged.connect(self._update_volume_label)
-        self.volume_slider.sliderReleased.connect(self.on_volume_change)
+        # Use QTimer for debounce instead of sliderReleased
+        from PyQt6.QtCore import QTimer
+        self._volume_debounce_timer = QTimer()
+        self._volume_debounce_timer.setSingleShot(True)
+        self._volume_debounce_timer.setInterval(200) # 200ms debounce
+        self._volume_debounce_timer.timeout.connect(self.on_volume_change)
+        
+        self.volume_slider.valueChanged.connect(self._on_slider_changed)
+        # self.volume_slider.sliderReleased.connect(self.on_volume_change) # Removed
+        
         self.volume_value = QLabel("50%")
         self.volume_value.setFixedWidth(40)
         
@@ -171,6 +178,11 @@ class SettingsTab(QWidget):
         # Spacer
         layout.addStretch()
     
+    def _on_slider_changed(self, value):
+        """Update label and start debounce timer."""
+        self.volume_value.setText(f"{value}%")
+        self._volume_debounce_timer.start()
+        
     def _update_volume_label(self, value):
         """Update volume label only (for visual feedback during drag)."""
         self.volume_value.setText(f"{value}%")

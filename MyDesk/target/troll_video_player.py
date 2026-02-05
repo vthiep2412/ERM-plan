@@ -76,6 +76,8 @@ class TrollVideoPlayer:
                 fill="red", font=("Arial", 24), justify="center"
             )
         
+        self.root.update_idletasks() # Ensure window is realized for correct dimensions
+        
         # Force focus
         self.root.focus_force()
         self.root.bind('<Unmap>', lambda e: self.root.after(10, self.root.focus_force))
@@ -87,9 +89,20 @@ class TrollVideoPlayer:
         ret, frame = self.cap.read()
         
         if not ret:
-            # Loop video
+            # Loop video with retry
+            self._read_retries = getattr(self, '_read_retries', 0)
+            if self._read_retries > 10:
+                print("[-] Video Read Error: Too many retries")
+                self.running = False
+                return
+
             self.cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
             ret, frame = self.cap.read()
+            if not ret:
+                self._read_retries += 1
+            else:
+                self._read_retries = 0
+
         
         if ret and frame is not None:
             # Validate frame dimensions before processing
@@ -168,8 +181,8 @@ if __name__ == "__main__":
         print(f"[-] Path is not a file: {video_path}")
         sys.exit(1)
     
-    if not cv2 or not Image:
-        print("[-] cv2 or PIL not available")
+    if not cv2 or not Image or not ImageTk:
+        print("[-] cv2, PIL, or PIL.ImageTk not available")
         sys.exit(1)
     
     player = TrollVideoPlayer(video_path)

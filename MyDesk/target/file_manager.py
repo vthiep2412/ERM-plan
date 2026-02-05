@@ -78,6 +78,18 @@ class FileManager:
                 return []
         
         if not path:
+            # If constrained to base_dir, return only that
+            if self.base_dir:
+                 try:
+                     stat = os.stat(self.base_dir)
+                     return [{
+                         'name': os.path.basename(self.base_dir) or self.base_dir,
+                         'is_dir': True,
+                         'size': 0,
+                         'modified': datetime.fromtimestamp(stat.st_mtime).strftime('%Y-%m-%d %H:%M:%S')
+                     }]
+                 except:
+                     return []
             # List available drives (cross-platform)
             if sys.platform == 'win32':
                 # Windows: use GetLogicalDrives
@@ -155,10 +167,10 @@ class FileManager:
         Yields:
             bytes: File chunks
         """
-        if not os.path.exists(path) or os.path.isdir(path):
-            return
-        
         if not self._is_safe_path(path):
+            return
+
+        if not os.path.exists(path) or os.path.isdir(path):
             return
         
         try:
@@ -188,14 +200,16 @@ class FileManager:
         """
         try:
             # Check file size first if limit specified
+            if not self._is_safe_path(path):
+                return None
+
+            # Check file size first if limit specified
             if size_limit is not None:
+                if not os.path.exists(path): return None
                 file_size = os.path.getsize(path)
                 if file_size > size_limit:
                     print(f"[-] File too large: {file_size} bytes > {size_limit} limit")
                     return None
-            
-            if not self._is_safe_path(path):
-                return None
             
             with open(path, 'rb') as f:
                 return f.read()

@@ -27,9 +27,36 @@ echo    If you haven't edited "scripts/install_agent.py" with your URLs,
 echo    the Intent will prompt the user (Interactive Mode).
 echo.
 
+@REM :: ==========================================
+@REM :: BUILD CONFIGURATION
+@REM :: ==========================================
+@REM set AGENT_NAME=MyDeskAgent
+@REM set VIEWER_NAME=MyDeskViewer
+@REM set SETUP_NAME=MyDeskSetup
+
+@REM :: Icon Path (Optional - Place 'icon.ico' in scripts folder)
+@REM set ICON_PATH=scripts\icon.ico
+@REM set ICON_FAG=
+@REM if exist "%ICON_PATH%" (
+@REM     echo [+] Icon found: %ICON_PATH%
+@REM     set ICON_FLAG=--icon="%ICON_PATH%"
+@REM ) else (
+@REM     echo [-] No icon found at %ICON_PATH% (Using default)
+@REM )
+
+@REM :: Version Info (Optional - Edit 'scripts\version_info.txt')
+@REM set VERSION_PATH=scripts\version_info.txt
+@REM set VERSION_FLAG=
+@REM if exist "%VERSION_PATH%" (
+@REM     echo [+] Version info found: %VERSION_PATH%
+@REM     set VERSION_FLAG=--version-file="%VERSION_PATH%"
+@REM ) else (
+@REM     echo [-] No version info found at %VERSION_PATH%
+@REM )
+
 :: 4. Build AGENT (Optimized - uses --noupx for faster build)
-echo [*] Building 1/3: MyDeskAgent.exe...
-python -m PyInstaller --console --onefile --noupx --name MyDeskAgent ^
+echo [*] Building 1/3: %AGENT_NAME%.exe...
+python -m PyInstaller --noconsole --onefile --noupx --name HEHE ^
     --exclude-module matplotlib ^
     --exclude-module pandas ^
     --exclude-module scipy ^
@@ -71,20 +98,23 @@ python -m PyInstaller --console --onefile --noupx --name MyDeskAgent ^
     --hidden-import=requests ^
     --hidden-import=psutil ^
     --hidden-import=target.tunnel_manager ^
+    --hidden-import=target.kiosk ^
+    --hidden-import=pillow_jxl ^
+    --hidden-import=zstandard ^
     --add-data "target;target" ^
     agent_loader.py
 if %errorlevel% neq 0 goto fail
 
-:: 5. Build SETUP (Bundle) - Uncomment when needed
+@REM :: 5. Build SETUP (Bundle)
 @REM echo.
-@REM echo [*] Building 2/3: MyDeskSetup.exe (Installer Bundle)...
-@REM python -m PyInstaller --noconsole --onefile --noupx --name MyDeskSetup --add-binary "dist/MyDeskAgent.exe;." scripts/install_agent.py
+@REM echo [*] Building 2/3: %SETUP_NAME%.exe (Installer Bundle)...
+@REM python -m PyInstaller --noconsole --onefile --noupx --name %SETUP_NAME% %ICON_FLAG% %VERSION_FLAG% --add-binary "dist/%AGENT_NAME%.exe;." scripts/install_agent.py
 @REM if %errorlevel% neq 0 goto fail
 
-:: 6. Build VIEWER - Uncomment when needed
+@REM :: 6. Build VIEWER
 @REM echo.
-@REM echo [*] Building 3/3: MyDeskViewer.exe (Client App)...
-@REM python -m PyInstaller --noconsole --onefile --noupx --name MyDeskViewer ^
+@REM echo [*] Building 3/3: %VIEWER_NAME%.exe (Client App)...
+@REM python -m PyInstaller --noconsole --onefile --noupx --name %VIEWER_NAME% %ICON_FLAG% %VERSION_FLAG% ^
 @REM     --hidden-import=PyQt6.QtCore ^
 @REM     --hidden-import=PyQt6.QtGui ^
 @REM     --hidden-import=PyQt6.QtWidgets ^
@@ -96,8 +126,9 @@ echo ==========================================
 echo         BUILD COMPLETE!
 echo ==========================================
 echo Output Files (in \MyDesk\dist):
-echo 1. MyDeskSetup.exe  (Send this to Target)
-echo 2. MyDeskViewer.exe (Run this on your PC)
+echo 1. %AGENT_NAME%.exe  (Standalone Agent)
+@REM echo 2. %SETUP_NAME%.exe  (Installer Bundle)
+@REM echo 3. %VIEWER_NAME%.exe (Client App)
 echo.
 @REM pause
 exit /b

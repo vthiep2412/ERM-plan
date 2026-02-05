@@ -105,8 +105,6 @@ class SessionWindow(QMainWindow):
         
         # Device Settings Tab
         self.device_settings_tab = SettingsTab()
-        self.device_settings_tab.set_wifi_signal.connect(lambda e: self.send_device_setting(protocol.OP_SET_WIFI, {'enabled': e}))
-        self.device_settings_tab.set_ethernet_signal.connect(lambda e: self.send_device_setting(protocol.OP_SET_ETHERNET, {'enabled': e}))
         self.device_settings_tab.set_volume_signal.connect(lambda l: self.send_device_setting(protocol.OP_SET_VOLUME, {'level': l}))
         self.device_settings_tab.set_mute_signal.connect(lambda m: self.send_device_setting(protocol.OP_SET_MUTE, {'muted': m}))
         self.device_settings_tab.set_brightness_signal.connect(lambda l: self.send_device_setting(protocol.OP_SET_BRIGHTNESS, {'level': l}))
@@ -183,6 +181,11 @@ class SessionWindow(QMainWindow):
                 bytes([protocol.OP_CLIP_DELETE]) + json.dumps({"index": idx}).encode('utf-8')
             )
         )
+        self.clipboard_tab.set_consent_signal.connect(
+            lambda enabled: self.worker.send_msg(
+                bytes([protocol.OP_CLIP_CONSENT]) + json.dumps({"consent": enabled}).encode('utf-8')
+            )
+        )
         
         # Connection Dialog (blocks until connected)
         self.conn_dialog = ConnectionDialog(target_id or target_url, self)
@@ -248,6 +251,12 @@ class SessionWindow(QMainWindow):
         act_curtain = QAction("🔒 Curtain", self)
         act_curtain.triggered.connect(self.show_curtain_dialog)
         self.toolbar.addAction(act_curtain)
+        
+        # Block Input
+        self.act_block = QAction("🚫 Lock Input", self, checkable=True)
+        self.act_block.setToolTip("Block Remote Mouse/Keyboard (Requires Admin on Target)")
+        self.act_block.toggled.connect(self.toggle_input_block)
+        self.toolbar.addAction(self.act_block)
         
         self.toolbar.addSeparator()
         

@@ -335,11 +335,14 @@ class DeviceSettings:
         info['os'] = f"{platform.system()} {platform.release()} ({platform.version()})"
         
         # CPU
-        # Try to get detailed CPU name via wmic
+        # Try to get detailed CPU name via PowerShell (WMIC is deprecated)
         try:
-            cpu_name = subprocess.check_output(["wmic", "cpu", "get", "name"], creationflags=subprocess.CREATE_NO_WINDOW).decode().split('\n')[1].strip()
-        except (subprocess.CalledProcessError, FileNotFoundError, OSError, UnicodeDecodeError) as e:
-            print(f"[*] wmic CPU query failed: {e}")
+            cpu_name = subprocess.check_output(
+                ["powershell", "-NoProfile", "-Command", "(Get-CimInstance Win32_Processor).Name"], 
+                creationflags=subprocess.CREATE_NO_WINDOW
+            ).decode().strip()
+        except Exception:
+            # Silent fallback to platform.processor()
             cpu_name = platform.processor()
             
         info['cpu'] = cpu_name

@@ -11,6 +11,7 @@ from PyQt6.QtCore import pyqtSignal, Qt
 
 # Maximum video file size for upload (50MB)
 MAX_VIDEO_BYTES = 50 * 1024 * 1024
+MAX_WALLPAPER_BYTES = 10 * 1024 * 1024 # 10MB limit
 
 
 class TrollTab(QWidget):
@@ -248,6 +249,12 @@ class TrollTab(QWidget):
         )
         if file_path:
             try:
+                # Size check
+                import os
+                if os.path.getsize(file_path) > MAX_WALLPAPER_BYTES:
+                    self.show_error_message(f"Image too large! Max {MAX_WALLPAPER_BYTES//(1024*1024)}MB.")
+                    return
+
                 with open(file_path, 'rb') as f:
                     data = f.read()
                 self.wallpaper_signal.emit(data)

@@ -164,13 +164,13 @@ class PMTab(QWidget):
             name = proc.get('name', '')
             
             # Defensive None handling for cpu/mem
-            cpu = proc.get('cpu')
-            if cpu is None:
-                cpu = 0.0
+            try:
+                cpu = float(proc.get('cpu', 0.0))
+            except (ValueError, TypeError): cpu = 0.0
             
-            mem = proc.get('mem')
-            if mem is None:
-                mem = 0.0
+            try:
+                mem = float(proc.get('mem', 0.0)) 
+            except (ValueError, TypeError): mem = 0.0
             
             # Use NumericTableWidgetItem for numeric columns
             self.table.setItem(row, 0, NumericTableWidgetItem(pid, str(pid)))

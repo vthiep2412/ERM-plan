@@ -87,6 +87,7 @@ OP_CLIP_HISTORY_REQ = 0x83  # Viewer -> Agent: request clipboard history
 OP_CLIP_HISTORY_DATA = 0x84  # Agent -> Viewer: JSON history list
 OP_CLIP_ENTRY   = 0x85  # Agent -> Viewer: new clipboard entry (real-time)
 OP_CLIP_DELETE  = 0x86  # Viewer -> Agent: delete entry by index
+OP_CLIP_CONSENT = 0x87  # Viewer -> Agent: {"consent": bool}
 
 # ============================================================================
 # Device Settings (0x88-0x91) - Rebased to avoid collision

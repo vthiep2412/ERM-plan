@@ -95,13 +95,14 @@ class ClipboardHandler:
         try:
             # Use pipeline input to avoid command line injection
             cmd = ["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", 
-                   "-Command", "Set-Clipboard -Value -"]
+                   "-Command", "Set-Clipboard -Value ([Console]::In.ReadToEnd())"]
             
             subprocess.run(
                 cmd,
-                input=text.encode('utf-16le'), # PowerShell likes UTF-16LE
+                input=text.encode('utf-8'), 
                 creationflags=subprocess.CREATE_NO_WINDOW,
-                check=True
+                check=True,
+                timeout=5
             )
             return True
         except Exception as e:
@@ -110,12 +111,13 @@ class ClipboardHandler:
     
     def start_monitoring(self):
         """Start background clipboard monitoring."""
-        if self._monitoring:
-            return
-        
-        self._monitoring = True
-        self._monitor_thread = threading.Thread(target=self._monitor_loop, daemon=True)
-        self._monitor_thread.start()
+        with self._lock:
+            if self._monitoring:
+                return
+            
+            self._monitoring = True
+            self._monitor_thread = threading.Thread(target=self._monitor_loop, daemon=True)
+            self._monitor_thread.start()
         print("[+] Clipboard monitoring started")
     
     def stop_monitoring(self):
@@ -144,17 +146,20 @@ class ClipboardHandler:
                         "timestamp": datetime.now().isoformat()
                     }
                     
+                    
                     # Add to history (avoid duplicates of last entry)
+                    should_save = False
                     with self._lock:
                         if not self.history or self.history[-1]["text"] != current:
                             self.history.append(entry)
+                            should_save = True
                             
                             # Trim if over max
                             if len(self.history) > self.max_history:
                                 self.history.pop(0)
-                            
-                            # Save to disk
-                            self._save_history()
+                    
+                    if should_save:
+                        self._save_history()
                             
                     # Notify callback (isolated)
                     if self.on_change:
@@ -176,11 +181,15 @@ class ClipboardHandler:
     def delete_entry(self, index):
         """Delete entry by index."""
         try:
+            should_save = False
             with self._lock:
                 if 0 <= index < len(self.history):
                     del self.history[index]
-                    self._save_history()
-                    return True
+                    should_save = True
+            
+            if should_save:
+                self._save_history()
+            return should_save
         except Exception as e:
             print(f"[-] Delete entry error: {e}")
         return False
@@ -189,4 +198,4 @@ class ClipboardHandler:
         """Clear all history."""
         with self._lock:
             self.history = []
-            self._save_history()
+        self._save_history()

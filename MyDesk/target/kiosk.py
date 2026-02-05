@@ -48,13 +48,13 @@ class FakeUpdateKiosk:
             # Avg duration = 6 hours = 21600 seconds
             # Avg per tick = 216 sec (if linear), but we randomize
             
-            # Chance to increment
+             # Chance to increment (40% chance)
             if random.random() > 0.6: 
                 self.progress += 1
                 self.label.config(text=f"Configuring Windows Updates\n{self.progress}% complete\n\nDon't turn off your computer")
             
-            # Random delay 1-5 minutes
-            delay = random.randint(60000, 300000) 
+            # Random delay 30-150 seconds (Avg ~1.5 min per tick -> ~3 hours total)
+            delay = random.randint(30000, 150000) 
             self.root.after(delay, self.update_progress)
         else:
             # Progress complete - finish up

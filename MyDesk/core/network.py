@@ -20,11 +20,13 @@ async def send_msg(ws: websockets.WebSocketClientProtocol | None, data: bytes):
     except Exception as e:
         raise ConnectionError(f"WS Send failed: {e}")
 
-async def recv_msg(ws) -> Optional[bytes]:
+async def recv_msg(ws: Optional[object]) -> Optional[bytes]:
     """
     Receives a message via WebSocket.
     Returns None on disconnect.
     """
+    if ws is None:
+        return None
     try:
         data = await ws.recv()
         # Ensure it's bytes

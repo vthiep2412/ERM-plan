@@ -160,7 +160,9 @@ class ShellHandler:
         finally:
             # Flush any remaining buffer
             if self._cwd_buffer and self.on_output:
-                self.on_output(self._cwd_buffer)
+                try:
+                    self.on_output(self._cwd_buffer)
+                except Exception: pass
                 self._cwd_buffer = ""
             
             if self.process and self.process.poll() is not None and self.running:

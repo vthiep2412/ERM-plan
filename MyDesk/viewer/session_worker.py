@@ -91,9 +91,12 @@ class AsyncSessionWorker(QObject):
     async def _connect_and_stream(self):
         try:
             # FIX: Downgrade WSS to WS for localhost to avoid handshake errors
-            if "localhost" in self.target_url or "127.0.0.1" in self.target_url:
-                if self.target_url.startswith("wss://"):
-                    self.target_url = self.target_url.replace("wss://", "ws://")
+            from urllib.parse import urlparse, urlunparse
+            parsed = urlparse(self.target_url)
+            if parsed.hostname in ("localhost", "127.0.0.1", "::1"):
+                if parsed.scheme == "wss":
+                    # Rebuild with ws scheme
+                    self.target_url = urlunparse(parsed._replace(scheme="ws"))
                     print(f"[*] Downgraded to ws:// for localhost: {self.target_url}")
 
             # Step 0: Connecting to broker
@@ -105,9 +108,14 @@ class AsyncSessionWorker(QObject):
                 
                 # If Target ID is present, we are using Broker or P2P Relay
                 # Skip Broker Lookup if connecting directly via localhost or Cloudflare Tunnel
-                is_direct = "trycloudflare.com" in self.target_url or \
-                           "localhost" in self.target_url or \
-                           "127.0.0.1" in self.target_url
+                # Use parsed hostname for accuracy
+                try:
+                    if 'parsed' not in locals(): parsed = urlparse(self.target_url)
+                    hostname = parsed.hostname or ""
+                    is_direct = (hostname in ("localhost", "127.0.0.1", "::1") or 
+                                 hostname.endswith("trycloudflare.com"))
+                except:
+                    is_direct = False
 
                 if self.target_id and is_direct:
                     # Warn: target_id provided but using direct connection

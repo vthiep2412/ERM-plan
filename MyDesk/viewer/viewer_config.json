@@ -10,10 +10,38 @@
         },
         {
             "mode": "direct",
-            "alias": "n\u1edd \u00f4 n\u00f4",
+            "alias": "n\u1edd \u00f4 n\u00f4 2",
             "url": "ws://localhost:8765",
             "id": "",
-            "last_seen": "2026-02-04 11:08"
+            "last_seen": "2026-02-04 20:35"
+        },
+        {
+            "mode": "direct",
+            "alias": "ch\u00e2u",
+            "url": "wss://systematic-thereof-history-acm.trycloudflare.com",
+            "id": "",
+            "last_seen": "2026-02-04 20:53"
+        },
+        {
+            "mode": "broker",
+            "alias": "emr",
+            "url": "wss://localhost:8765",
+            "id": "https://captain-resources-toolbox-heath.trycloudflare.com",
+            "last_seen": "2026-02-04 20:56"
+        },
+        {
+            "mode": "direct",
+            "alias": "emr",
+            "url": "wss://captain-resources-toolbox-heath.trycloudflare.com",
+            "id": "",
+            "last_seen": "2026-02-04 20:57"
+        },
+        {
+            "mode": "direct",
+            "alias": "ch\u00e2u",
+            "url": "wss://housing-butler-nick-banana.trycloudflare.com",
+            "id": "",
+            "last_seen": "2026-02-04 21:10"
         }
     ]
 }
