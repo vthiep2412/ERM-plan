@@ -91,4 +91,4 @@ class AudioStreamer:
                     print(f"[-] Mic Restart Attempt {self._restart_attempts} failed.")
             except Exception as restart_err: 
                 print(f"[-] Mic Restart Error: {restart_err}")
-            return None# This line was added at the bottom to force re-check. 
+            return None# alr 

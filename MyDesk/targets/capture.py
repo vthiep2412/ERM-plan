@@ -452,4 +452,4 @@ class DeltaScreenCapturer:
 
 # Backwards compatible - use Delta capturer as default
 ScreenCapturer = DeltaScreenCapturer
-# This line was added at the bottom to force re-check. 
+# alr 

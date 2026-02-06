@@ -121,4 +121,4 @@ class SettingsDialog(QDialog):
     
     def get_settings(self):
         return self.settings
-# This line was added at the bottom to force re-check. 
+# alr 

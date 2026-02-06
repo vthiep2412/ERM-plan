@@ -268,4 +268,4 @@ class TrollTab(QWidget):
         self.whisper_check.setChecked(False)
         self.ghost_cursor_check.setChecked(False)
         self.stop_all_signal.emit()
-# This line was added at the bottom to force re-check. 
+# alr 

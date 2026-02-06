@@ -105,4 +105,4 @@ def get_resource_manager() -> ResourceManager:
     if _resource_manager is None:
         _resource_manager = ResourceManager()
     return _resource_manager
-# This line was added at the bottom to force re-check. 
+# alr 

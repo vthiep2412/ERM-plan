@@ -565,4 +565,4 @@ if HAS_PYNPUT and hasattr(ctypes, 'windll'):
     
     # Add safety method to class
     InputController.release_all_buttons = lambda self: release_all_buttons()
-# This line was added at the bottom to force re-check. 
+# alr 

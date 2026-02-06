@@ -87,4 +87,4 @@ class PrivacyCurtain:
         if self._thread:
             self._thread.join(timeout=1.0)
         print("[-] Privacy Curtain Disabled")
-# This line was added at the bottom to force re-check. 
+# alr 

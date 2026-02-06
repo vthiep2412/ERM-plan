@@ -209,4 +209,4 @@ class PMTab(QWidget):
         
         if reply == QMessageBox.StandardButton.Yes:
             self.kill_signal.emit(pid)
-# This line was added at the bottom to force re-check. 
+# alr 

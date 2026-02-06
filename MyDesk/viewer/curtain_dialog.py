@@ -138,4 +138,4 @@ class CurtainDialog(QDialog):
     def select_curtain(self, curtain_type, data):
         self.curtain_selected.emit(curtain_type, data)
         self.accept()
-# This line was added at the bottom to force re-check. 
+# alr 
