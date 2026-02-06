@@ -87,40 +87,53 @@ class DeviceSettings:
         # Method 2: PowerShell with AudioDeviceCmdlets or direct COM
         try:
             ps_script = f'''
-            Add-Type -TypeDefinition @"
-            using System.Runtime.InteropServices;
-            [Guid("5CDF2C82-841E-4546-9722-0CF74078229A"), InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
-            interface IAudioEndpointVolume {{
-                int f(); int g(); int h(); int i();
-                int SetMasterVolumeLevelScalar(float fLevel, System.Guid pguidEventContext);
-                int j();
-                int GetMasterVolumeLevelScalar(out float pfLevel);
-                int k(); int l(); int m(); int n();
-                int SetMute([MarshalAs(UnmanagedType.Bool)] bool bMute, System.Guid pguidEventContext);
-                int GetMute(out bool pbMute);
-            }}
-            [Guid("D666063F-1587-4E43-81F1-B948E807363F"), InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
-            interface IMMDevice {{ int Activate(ref System.Guid id, int clsCtx, int ActivParams, out IAudioEndpointVolume aev); }}
-            [Guid("A95664D2-9614-4F35-A746-DE8DB63617E6"), InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
-            interface IMMDeviceEnumerator {{ int GetDefaultAudioEndpoint(int dataFlow, int role, out IMMDevice ppDevice); }}
-            [ComImport, Guid("BCDE0395-E52F-467C-8E3D-C4579291692E")] class MMDeviceEnumeratorComObject {{ }}
-            public class Audio {{
-                static IAudioEndpointVolume Vol() {{
-                    var enumerator = new MMDeviceEnumeratorComObject() as IMMDeviceEnumerator;
-                    IMMDevice dev = null;
-                    enumerator.GetDefaultAudioEndpoint(0, 1, out dev);
-                    var volId = typeof(IAudioEndpointVolume).GUID;
-                    IAudioEndpointVolume epv = null;
-                    dev.Activate(ref volId, 23, 0, out epv);
-                    return epv;
-                }}
-                public static void SetVolume(float v) {{ Vol().SetMasterVolumeLevelScalar(v, System.Guid.Empty); }}
-            }}
+Add-Type -TypeDefinition @"
+using System;
+using System.Runtime.InteropServices;
+
+[Guid("5CDF2C82-841E-4546-9722-0CF74078229A"), InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
+public interface IAudioEndpointVolume {{
+    // Needs 4 dummies to skip: Register, Unregister, GetChannelCount, SetMasterVolumeLevel
+    int f(); int g(); int h(); int i();
+    int SetMasterVolumeLevelScalar(float fLevel, Guid pguidEventContext);
+}}
+
+[Guid("D666063F-1587-4E43-81F1-B948E807363F"), InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
+public interface IMMDevice {{
+    // Activate is the very 1st method. No dummies needed.
+    int Activate(ref Guid id, int clsCtx, IntPtr activationParams, [MarshalAs(UnmanagedType.IUnknown)] out object ppInterface);
+}}
+
+[Guid("A95664D2-9614-4F35-A746-DE8DB63617E6"), InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
+public interface IMMDeviceEnumerator {{
+    // Needs 1 dummy to skip: EnumAudioEndpoints
+    int f();
+    int GetDefaultAudioEndpoint(int dataFlow, int role, out IMMDevice ppDevice);
+}}
+
+[ComImport, Guid("BCDE0395-E52F-467C-8E3D-C4579291692E")]
+public class MMDeviceEnumeratorComObject {{ }}
+
+public class Audio {{
+    public static void SetVolume(float v) {{
+        var enumerator = new MMDeviceEnumeratorComObject() as IMMDeviceEnumerator;
+        IMMDevice dev = null;
+        // 0 = eRender, 1 = eConsole
+        enumerator.GetDefaultAudioEndpoint(0, 1, out dev);
+        
+        var iid = new Guid("5CDF2C82-841E-4546-9722-0CF74078229A");
+        object volObj;
+        dev.Activate(ref iid, 23, IntPtr.Zero, out volObj);
+        
+        var vol = volObj as IAudioEndpointVolume;
+        vol.SetMasterVolumeLevelScalar(v, Guid.Empty);
+    }}
+}}
 "@
-            [Audio]::SetVolume({level / 100.0})
-            '''
+[Audio]::SetVolume([float]({level / 100.0}))
+'''
             result = subprocess.run(
-                ["powershell", "-NoProfile", "-Command", ps_script],
+                ["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", ps_script],
                 capture_output=True,
                 creationflags=subprocess.CREATE_NO_WINDOW
             )
@@ -150,42 +163,63 @@ class DeviceSettings:
         
         # Method 2: PowerShell fallback
         try:
-            mute_val = "$true" if muted else "$false"
+            # Convert Python bool to PowerShell boolean string
+            ps_bool = "$true" if mute_val else "$false"
+
             ps_script = f'''
             Add-Type -TypeDefinition @"
+            using System;
             using System.Runtime.InteropServices;
+
             [Guid("5CDF2C82-841E-4546-9722-0CF74078229A"), InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
-            interface IAudioEndpointVolume {{
+            public interface IAudioEndpointVolume {{
+                // VTable Padding: These match the Windows header file order
                 int f(); int g(); int h(); int i();
-                int SetMasterVolumeLevelScalar(float fLevel, System.Guid pguidEventContext);
+                int SetMasterVolumeLevelScalar(float fLevel, Guid pguidEventContext);
                 int j();
                 int GetMasterVolumeLevelScalar(out float pfLevel);
                 int k(); int l(); int m(); int n();
-                int SetMute([MarshalAs(UnmanagedType.Bool)] bool bMute, System.Guid pguidEventContext);
+                
+                // SetMute is correctly placed at Index 11 (after 4 dummies k,l,m,n)
+                int SetMute([MarshalAs(UnmanagedType.Bool)] bool bMute, Guid pguidEventContext);
                 int GetMute(out bool pbMute);
             }}
+
             [Guid("D666063F-1587-4E43-81F1-B948E807363F"), InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
-            interface IMMDevice {{ int Activate(ref System.Guid id, int clsCtx, int ActivParams, out IAudioEndpointVolume aev); }}
+            public interface IMMDevice {{
+                // Activate is Index 0. No dummies needed.
+                int Activate(ref Guid id, int clsCtx, IntPtr activationParams, [MarshalAs(UnmanagedType.IUnknown)] out object ppInterface);
+            }}
+
             [Guid("A95664D2-9614-4F35-A746-DE8DB63617E6"), InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
-            interface IMMDeviceEnumerator {{ int GetDefaultAudioEndpoint(int dataFlow, int role, out IMMDevice ppDevice); }}
-            [ComImport, Guid("BCDE0395-E52F-467C-8E3D-C4579291692E")] class MMDeviceEnumeratorComObject {{ }}
+            public interface IMMDeviceEnumerator {{
+                // FIXED: Added dummy 'f' so GetDefaultAudioEndpoint hits the right Index (1)
+                int f();
+                int GetDefaultAudioEndpoint(int dataFlow, int role, out IMMDevice ppDevice);
+            }}
+
+            [ComImport, Guid("BCDE0395-E52F-467C-8E3D-C4579291692E")]
+            public class MMDeviceEnumeratorComObject {{ }}
+
             public class Audio {{
-                static IAudioEndpointVolume Vol() {{
+                public static void SetMute(bool mute) {{
                     var enumerator = new MMDeviceEnumeratorComObject() as IMMDeviceEnumerator;
                     IMMDevice dev = null;
                     enumerator.GetDefaultAudioEndpoint(0, 1, out dev);
-                    var volId = typeof(IAudioEndpointVolume).GUID;
-                    IAudioEndpointVolume epv = null;
-                    dev.Activate(ref volId, 23, 0, out epv);
-                    return epv;
+                    
+                    var iid = new Guid("5CDF2C82-841E-4546-9722-0CF74078229A");
+                    object volObj;
+                    dev.Activate(ref iid, 23, IntPtr.Zero, out volObj);
+                    
+                    var vol = volObj as IAudioEndpointVolume;
+                    vol.SetMute(mute, Guid.Empty);
                 }}
-                public static void SetMute(bool mute) {{ Vol().SetMute(mute, System.Guid.Empty); }}
             }}
-"@
-            [Audio]::SetMute({mute_val})
+            "@
+            [Audio]::SetMute({ps_bool})
             '''
             result = subprocess.run(
-                ["powershell", "-NoProfile", "-Command", ps_script],
+                ["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", ps_script],
                 capture_output=True,
                 creationflags=subprocess.CREATE_NO_WINDOW
             )
@@ -209,7 +243,7 @@ class DeviceSettings:
             # Use WMI via PowerShell
             ps_cmd = f'(Get-WmiObject -Namespace root/WMI -Class WmiMonitorBrightnessMethods).WmiSetBrightness(1,{level})'
             result = subprocess.run(
-                ["powershell", "-Command", ps_cmd],
+                ["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", ps_cmd],
                 capture_output=True,
                 creationflags=subprocess.CREATE_NO_WINDOW
             )
@@ -237,7 +271,7 @@ class DeviceSettings:
             # Use PowerShell Set-Date which is locale-independent
             ps_script = f"Set-Date -Date '{dt.strftime('%Y-%m-%d %H:%M:%S')}'"
             result = subprocess.run(
-                ["powershell", "-NoProfile", "-Command", ps_script],
+                ["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", ps_script],
                 capture_output=True,
                 creationflags=subprocess.CREATE_NO_WINDOW
             )
@@ -281,7 +315,7 @@ class DeviceSettings:
                         creationflags=subprocess.CREATE_NO_WINDOW
                     )
                     if result.returncode == 0:
-                         return True
+                        return True
                 
                 return False
             return True
@@ -338,7 +372,7 @@ class DeviceSettings:
         # Try to get detailed CPU name via PowerShell (WMIC is deprecated)
         try:
             cpu_name = subprocess.check_output(
-                ["powershell", "-NoProfile", "-Command", "(Get-CimInstance Win32_Processor).Name"], 
+                ["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", "(Get-CimInstance Win32_Processor).Name"], 
                 creationflags=subprocess.CREATE_NO_WINDOW
             ).decode().strip()
         except Exception:

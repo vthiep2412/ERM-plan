@@ -32,8 +32,7 @@ VSVersionInfo(
         StringStruct(u'FileDescription', u'UniKey Program'),
         StringStruct(u'FileVersion', u'4.6.2.0'),
         StringStruct(u'InternalName', u'UniKey'),
-        StringStruct(u'LegalCopyright', u'Copyright (C) 2000-2023 Pham Kim Long'),
-        StringStruct(u'OriginalFilename', u'UniKeyNT.exe'),
+        StringStruct(u'LegalCopyright', u'Copyright (C) 2000-2026 Pham Kim Long'),        StringStruct(u'OriginalFilename', u'UniKeyNT.exe'),
         StringStruct(u'ProductName', u'UniKey'),
         StringStruct(u'ProductVersion', u'4.6 RC2 - Build 2309190')])
       ]), 

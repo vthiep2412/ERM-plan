@@ -11,6 +11,13 @@ sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 from core import protocol
 from core.network import send_msg, recv_msg
 
+# WebRTC support (optional)
+try:
+    from viewer.webrtc_client import WebRTCClient, AIORTC_AVAILABLE
+except ImportError:
+    AIORTC_AVAILABLE = False
+    WebRTCClient = None
+
 class AsyncSessionWorker(QObject):
     frame_received = pyqtSignal(bytes)
     cam_received = pyqtSignal(bytes)
@@ -33,6 +40,9 @@ class AsyncSessionWorker(QObject):
     clipboard_history = pyqtSignal(list)  # Clipboard history list
     clipboard_entry = pyqtSignal(dict)  # New real-time clipboard entry
     sysinfo_data = pyqtSignal(dict)
+    
+    # WebRTC signals (Project Supersonic)
+    webrtc_frame_received = pyqtSignal(object)  # numpy array from WebRTC video track
 
     def __init__(self, target_url, target_id=None):
         super().__init__()
@@ -42,6 +52,10 @@ class AsyncSessionWorker(QObject):
         self.loop = None
         self.ws = None
         self._lock = threading.Lock()
+        
+        # WebRTC client (Project Supersonic)
+        self.webrtc_client = None
+        self.use_webrtc = AIORTC_AVAILABLE  # Auto-enable if available
 
     def is_connected(self):
         """Thread-safe connection check"""
@@ -58,6 +72,11 @@ class AsyncSessionWorker(QObject):
         """Graceful shutdown"""
         self.running = False
         with self._lock:
+            # Close WebRTC connection
+            if self.webrtc_client and self.loop and self.loop.is_running():
+                asyncio.run_coroutine_threadsafe(self.webrtc_client.close(), self.loop)
+                self.webrtc_client = None
+            
             if self.ws:
                 # Schedule close if loop exists
                 if self.loop and self.loop.is_running():
@@ -169,10 +188,14 @@ class AsyncSessionWorker(QObject):
                             # Handshake Complete!
                             self.connection_ready.emit()
                             
-                            # Start Streaming
-                            await send_msg(ws, json.dumps({"op": "start_stream"}))
+                            # Try WebRTC first (Project Supersonic)
+                            if self.use_webrtc and AIORTC_AVAILABLE:
+                                await self._start_webrtc(ws)
+                            else:
+                                # Fallback to old WebSocket streaming
+                                await send_msg(ws, json.dumps({"op": "start_stream"}))
                             
-                            # Enter Loop
+                            # Enter message loop
                             await self._read_loop(ws)
                             return
                     except Exception:
@@ -188,6 +211,42 @@ class AsyncSessionWorker(QObject):
             with self._lock:
                 self.ws = None
             self.connection_lost.emit()
+
+    # ================================================================
+    # WebRTC Methods (Project Supersonic)
+    # ================================================================
+    async def _start_webrtc(self, ws):
+        """Initialize WebRTC connection with Agent"""
+        try:
+            print("[*] Starting WebRTC connection...")
+            
+            # Create WebRTC client with message sender
+            async def send_ws_message(opcode: int, payload: bytes):
+                await send_msg(ws, bytes([opcode]) + payload)
+            
+            self.webrtc_client = WebRTCClient(send_ws_message)
+            
+            # Connect video frame signal
+            if hasattr(self.webrtc_client, 'video_frame_received'):
+                self.webrtc_client.video_frame_received.connect(self._on_webrtc_frame)
+            
+            # Start WebRTC negotiation (sends OP_RTC_OFFER)
+            await self.webrtc_client.start_connection()
+            print("[+] WebRTC offer sent, waiting for answer...")
+            
+        except Exception as e:
+            print(f"[-] WebRTC initialization failed: {e}, falling back to WebSocket")
+            self.webrtc_client = None
+            # Fallback to old streaming
+            await send_msg(ws, json.dumps({"op": "start_stream"}))
+    
+    def _on_webrtc_frame(self, frame):
+        """Handle incoming WebRTC video frame (numpy array)"""
+        try:
+            # Emit to UI (same signal path as old frames)
+            self.webrtc_frame_received.emit(frame)
+        except Exception as e:
+            print(f"[-] WebRTC frame error: {e}")
 
     # Alias for compatibility with new handshake logic
     async def _read_loop(self, ws):
@@ -282,6 +341,27 @@ class AsyncSessionWorker(QObject):
                     self.sysinfo_data.emit(data)
                 except Exception as e:
                     print(f"[!] Error parsing sysinfo data: {e}")
+            
+            # ================================================================
+            # WebRTC Signaling (Project Supersonic)
+            # ================================================================
+            elif opcode == protocol.OP_RTC_ANSWER:
+                if self.webrtc_client:
+                    try:
+                        data = json.loads(payload.decode('utf-8'))
+                        asyncio.create_task(self.webrtc_client.handle_answer(
+                            data.get('sdp'), data.get('type', 'answer')
+                        ))
+                    except Exception as e:
+                        print(f"[!] WebRTC answer error: {e}")
+            
+            elif opcode == protocol.OP_ICE_CANDIDATE:
+                if self.webrtc_client:
+                    try:
+                        data = json.loads(payload.decode('utf-8'))
+                        asyncio.create_task(self.webrtc_client.handle_ice_candidate(data))
+                    except Exception as e:
+                        print(f"[!] WebRTC ICE candidate error: {e}")
             
             elif opcode == protocol.OP_ERROR:
                 try:

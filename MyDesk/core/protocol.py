@@ -3,11 +3,16 @@ MyDesk Protocol Definitions
 defines OpCodes and Constants for the network communication.
 """
 
-# Connection / Broker Protocol
-OP_HELLO        = 1  # Agent -> Broker (Register ID)
-OP_LOOKUP       = 2  # Viewer -> Broker (Request Connection to ID)
-OP_CONNECT      = 3  # Broker -> Agent (Incoming Connection)
-OP_BRIDGE_OK    = 4  # Broker -> Viewer (Connection Established)
+# WebRTC Signaling Protocol (replaces old Broker protocol)
+OP_RTC_OFFER      = 0x05  # SDP Offer (JSON: {"sdp": "...", "type": "offer"})
+OP_RTC_ANSWER     = 0x06  # SDP Answer (JSON: {"sdp": "...", "type": "answer"})
+OP_ICE_CANDIDATE  = 0x07  # ICE Candidate (JSON: {"candidate": "...", ...})
+OP_THROTTLE       = 0x08  # Bandwidth control (JSON: {"fps": int, "quality": int})
+
+# Legacy Handshake (still used for WebSocket connection)
+OP_HELLO          = 0x01  # Initial handshake
+OP_BRIDGE_OK      = 0x02  # Bridge established (legacy)
+
 
 # WEBCAM
 OP_CAM_START = 0x40

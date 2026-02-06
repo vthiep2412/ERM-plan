@@ -60,8 +60,8 @@ class TunnelManager:
         t.daemon = True
         t.start()
         
-        # Wait for URL up to 20s
-        for _ in range(20):
+        # Wait for URL up to 45s
+        for _ in range(45):
             if self.public_url:
                 return self.public_url
             time.sleep(1)

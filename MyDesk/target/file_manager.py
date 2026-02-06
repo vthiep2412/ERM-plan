@@ -88,7 +88,7 @@ class FileManager:
                          'size': 0,
                          'modified': datetime.fromtimestamp(stat.st_mtime).strftime('%Y-%m-%d %H:%M:%S')
                      }]
-                 except:
+                 except (OSError, PermissionError):
                      return []
             # List available drives (cross-platform)
             if sys.platform == 'win32':

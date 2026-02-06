@@ -3,45 +3,73 @@
     "history": [
         {
             "mode": "direct",
-            "alias": "n\u1edd \u00f4 n\u00f4",
+            "alias": "vmware",
+            "url": "wss://reforms-friday-singer-sic.trycloudflare.com",
+            "id": "",
+            "last_seen": "2026-02-05 22:29"
+        },
+        {
+            "mode": "direct",
+            "alias": "ok",
+            "url": "wss://gibraltar-hormone-presentation-newfoundland.trycloudflare.com",
+            "id": "",
+            "last_seen": "2026-02-05 22:45"
+        },
+        {
+            "mode": "direct",
+            "alias": "vmware",
+            "url": "wss://underlying-drop-demanding-commission.trycloudflare.com",
+            "id": "",
+            "last_seen": "2026-02-05 22:51"
+        },
+        {
+            "mode": "direct",
+            "alias": "test",
+            "url": "wss://combine-accomplished-way-stephanie.trycloudflare.com",
+            "id": "",
+            "last_seen": "2026-02-06 14:14"
+        },
+        {
+            "mode": "direct",
+            "alias": "test",
+            "url": "wss://rolling-wide-myself-hon.trycloudflare.com",
+            "id": "",
+            "last_seen": "2026-02-06 14:19"
+        },
+        {
+            "mode": "direct",
+            "alias": "test",
+            "url": "wss://provincial-dishes-prior-vid.trycloudflare.com",
+            "id": "",
+            "last_seen": "2026-02-06 14:25"
+        },
+        {
+            "mode": "direct",
+            "alias": "test",
+            "url": "wss://eligible-sean-symbols-arthritis.trycloudflare.com",
+            "id": "",
+            "last_seen": "2026-02-06 15:20"
+        },
+        {
+            "mode": "direct",
+            "alias": "test",
+            "url": "wss://money-convention-influences-optimal.trycloudflare.com",
+            "id": "",
+            "last_seen": "2026-02-06 15:47"
+        },
+        {
+            "mode": "direct",
+            "alias": "test",
+            "url": "wss://attributes-almost-preferences-dancing.trycloudflare.com",
+            "id": "",
+            "last_seen": "2026-02-06 15:51"
+        },
+        {
+            "mode": "direct",
+            "alias": "test",
             "url": "wss://localhost:8765",
             "id": "",
-            "last_seen": "2026-02-04 08:18"
-        },
-        {
-            "mode": "direct",
-            "alias": "n\u1edd \u00f4 n\u00f4 2",
-            "url": "ws://localhost:8765",
-            "id": "",
-            "last_seen": "2026-02-04 20:35"
-        },
-        {
-            "mode": "direct",
-            "alias": "ch\u00e2u",
-            "url": "wss://systematic-thereof-history-acm.trycloudflare.com",
-            "id": "",
-            "last_seen": "2026-02-04 20:53"
-        },
-        {
-            "mode": "broker",
-            "alias": "emr",
-            "url": "wss://localhost:8765",
-            "id": "https://captain-resources-toolbox-heath.trycloudflare.com",
-            "last_seen": "2026-02-04 20:56"
-        },
-        {
-            "mode": "direct",
-            "alias": "emr",
-            "url": "wss://captain-resources-toolbox-heath.trycloudflare.com",
-            "id": "",
-            "last_seen": "2026-02-04 20:57"
-        },
-        {
-            "mode": "direct",
-            "alias": "ch\u00e2u",
-            "url": "wss://housing-butler-nick-banana.trycloudflare.com",
-            "id": "",
-            "last_seen": "2026-02-04 21:10"
+            "last_seen": "2026-02-06 16:06"
         }
     ]
 }

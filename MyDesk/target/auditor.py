@@ -30,7 +30,7 @@ class KeyAuditor:
 
     def on_press(self, key):
         try:
-            # Handle Alphanumeric
+            # Handle Alphanumeric Keys
             k_str = key.char
         except AttributeError:
             # Handle Special Keys

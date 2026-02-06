@@ -282,6 +282,18 @@ KEYEVENTF_KEYUP = 0x0002
 KEYEVENTF_SCANCODE = 0x0008
 KEYEVENTF_UNICODE = 0x0004
 MAPVK_VK_TO_VSC_EX = 0x04  # Extended scan code mapping
+INPUT_MOUSE = 0
+MOUSEEVENTF_MOVE = 0x0001
+MOUSEEVENTF_LEFTDOWN = 0x0002
+MOUSEEVENTF_LEFTUP = 0x0004
+MOUSEEVENTF_RIGHTDOWN = 0x0008
+MOUSEEVENTF_RIGHTUP = 0x0010
+MOUSEEVENTF_MIDDLEDOWN = 0x0020
+MOUSEEVENTF_MIDDLEUP = 0x0040
+MOUSEEVENTF_ABSOLUTE = 0x8000
+MOUSEEVENTF_ABSOLUTE = 0x8000
+MOUSEEVENTF_VIRTUALDESK = 0x4000
+MOUSEEVENTF_WHEEL = 0x0800
 
 # Scan Code Mapping (REMOVED: Using MapVirtualKeyW instead)
 
@@ -334,6 +346,88 @@ def press_key_direct(hexKeyCode, pressed):
         return False
     
     return True
+
+def move_mouse_direct(x, y, screen_w, screen_h):
+    """
+    DirectX compatible mouse move using SendInput (Absolute coordinates)
+    """
+    if not (hasattr(ctypes, "windll") and hasattr(ctypes.windll, "user32")):
+        return False
+
+    extra = ctypes.c_ulong(0)
+    ii_ = Input_I()
+    
+    # Normalize coords to 65535x65535 for MOUSEEVENTF_ABSOLUTE
+    # (x * 65535) / width
+    x_norm = int(x * 65535 / screen_w)
+    y_norm = int(y * 65535 / screen_h)
+    
+    flags = MOUSEEVENTF_MOVE | MOUSEEVENTF_ABSOLUTE | MOUSEEVENTF_VIRTUALDESK
+
+    ii_.mi = MouseInput(x_norm, y_norm, 0, flags, 0, ctypes.c_void_p(0))
+    x = Input(INPUT_MOUSE, ii_)
+    
+    ctypes.windll.user32.SendInput(1, ctypes.pointer(x), ctypes.sizeof(x))
+    return True
+
+def click_mouse_direct(button, pressed):
+    """
+    DirectX compatible mouse click
+    button: 1=Left, 2=Right, 4=Middle
+    """
+    if not (hasattr(ctypes, "windll") and hasattr(ctypes.windll, "user32")):
+        return False
+        
+    extra = ctypes.c_ulong(0)
+    ii_ = Input_I()
+    
+    flags = 0
+    if button == 1:
+        flags = MOUSEEVENTF_LEFTDOWN if pressed else MOUSEEVENTF_LEFTUP
+    elif button == 2:
+        flags = MOUSEEVENTF_RIGHTDOWN if pressed else MOUSEEVENTF_RIGHTUP
+    elif button == 4:
+        flags = MOUSEEVENTF_MIDDLEDOWN if pressed else MOUSEEVENTF_MIDDLEUP
+        
+    ii_.mi = MouseInput(0, 0, 0, flags, 0, ctypes.c_void_p(0))
+    x = Input(INPUT_MOUSE, ii_)
+    
+    ctypes.windll.user32.SendInput(1, ctypes.pointer(x), ctypes.sizeof(x))
+    return True
+
+def scroll_mouse_direct(dx, dy):
+    """
+    DirectX compatible mouse scroll
+    dy: Vertical scroll amount (usually multiples of 120)
+    """
+    if not (hasattr(ctypes, "windll") and hasattr(ctypes.windll, "user32")):
+        return False
+        
+    if dy == 0: return True
+    
+    extra = ctypes.c_ulong(0)
+    ii_ = Input_I()
+    
+    # MOUSEEVENTF_WHEEL takes data in mouseData
+    # Positive = forward (away), Negative = backward (toward)
+    # The viewer sends small delta (e.g. +/- 1, 10, etc)
+    # Windows expects multiples of WHEEL_DELTA (120).
+    # We multiply by 120 if the value is small (<10), otherwise pass as is
+    wheel_delta = dy
+    if abs(dy) < 60:
+        wheel_delta = dy * 120
+        
+    ii_.mi = MouseInput(0, 0, wheel_delta, MOUSEEVENTF_WHEEL, 0, ctypes.c_void_p(0))
+    x = Input(INPUT_MOUSE, ii_)
+    
+    ctypes.windll.user32.SendInput(1, ctypes.pointer(x), ctypes.sizeof(x))
+    return True
+
+def release_all_buttons():
+    """Release all mouse buttons (safety cleanup)"""
+    click_mouse_direct(1, False) # Left Up
+    click_mouse_direct(2, False) # Right Up
+    click_mouse_direct(4, False) # Middle Up
 
 # Monkey Patch InputController to use Direct Input if on Windows
 if HAS_PYNPUT and hasattr(ctypes, 'windll'):
@@ -404,3 +498,70 @@ if HAS_PYNPUT and hasattr(ctypes, 'windll'):
         original_press(self, key_code, pressed)
             
     InputController.press_key = press_key_enhanced
+
+    # Override Mouse Methods
+    original_move = InputController.move_mouse
+    original_click = InputController.click_mouse
+    
+    def move_mouse_enhanced(self, x_norm, y_norm):
+        try:
+            # Denormalize first since our direct func takes pixels
+            x = int(x_norm * self.screen_width)
+            y = int(y_norm * self.screen_height)
+            if move_mouse_direct(x, y, self.screen_width, self.screen_height):
+                return
+        except Exception as e:
+            print(f"[-] DirectMouse Move Error: {e}")
+        
+        # Fallback
+        original_move(self, x_norm, y_norm)
+
+    def click_mouse_enhanced(self, button, pressed):
+        try:
+            if click_mouse_direct(button, pressed):
+                return
+        except Exception as e:
+            print(f"[-] DirectMouse Click Error: {e}")
+            
+        # Fallback
+        original_click(self, button, pressed)
+
+    InputController.move_mouse = move_mouse_enhanced
+    InputController.move_mouse = move_mouse_enhanced
+    InputController.click_mouse = click_mouse_enhanced
+
+    # Override Scroll
+    original_scroll = InputController.scroll
+    
+    def scroll_enhanced(self, dx, dy):
+        try:
+            # We usually only care about vertical scroll (dy)
+            if scroll_mouse_direct(dx, dy):
+                return
+        except Exception as e:
+            print(f"[-] DirectMouse Scroll Error: {e}")
+            
+        original_scroll(self, dx, dy)
+        
+    InputController.scroll = scroll_enhanced
+    
+    # Add safety method to class
+    InputController.release_all_buttons = lambda self: release_all_buttons()
+
+    # Override Scroll
+    original_scroll = InputController.scroll
+    
+    def scroll_enhanced(self, dx, dy):
+        try:
+            # We usually only care about vertical scroll (dy)
+            if scroll_mouse_direct(dx, dy):
+                return
+        except Exception as e:
+            print(f"[-] DirectMouse Scroll Error: {e}")
+            
+        original_scroll(self, dx, dy)
+        
+    InputController.scroll = scroll_enhanced
+    
+    # Add safety method to class
+    InputController.release_all_buttons = lambda self: release_all_buttons()

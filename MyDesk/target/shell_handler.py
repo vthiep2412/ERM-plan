@@ -46,7 +46,7 @@ class ShellHandler:
             if shell_type == "ps":
                 # Returns: "__CWD__C:\Path\nPS C:\Path> "
                 hack = 'function prompt { "__CWD__" + $pwd.ProviderPath + "`nPS " + $pwd.ProviderPath + "> " }'
-                args = ["powershell", "-NoLogo", "-NoExit", "-Command", hack]
+                args = ["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-NoLogo", "-NoExit", "-Command", hack]
             else:
                 # CMD prompt hack: emit CWD marker then path prompt
                 # $P = Path, $G = >

@@ -323,7 +323,7 @@ class TrollHandler:
             $desktop.Self.InvokeVerb("Arrange By")
             '''
             subprocess.run(
-                ["powershell", "-Command", ps_script],
+                ["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", ps_script],
                 capture_output=True,
                 creationflags=subprocess.CREATE_NO_WINDOW
             )

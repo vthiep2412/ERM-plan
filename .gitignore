@@ -210,3 +210,4 @@ MyDesk_Broker_Deploy/
 cloudflared.exe
 viewer_keylogs*.txt
 NEXT_AGENT_INSTRUCTIONS.md
+MyDesk/target/

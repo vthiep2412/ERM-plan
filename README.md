@@ -64,4 +64,4 @@ pyinstaller MyDesk/MyDeskAgent.spec
 ```
 
 ## ⚠️ Disclaimer
-This software is intended for educational purposes and authorized remote administration only. Misuse of this software for malicious purposes is strictly prohibited.
+This software is intended for educational purposes and authorized remote administration only. **You must obtain explicit written consent from the system owner before deploying this tool.** Unauthorized access to computer systems may violate laws including the Computer Fraud and Abuse Act (CFAA) and similar statutes worldwide. Users assume all legal responsibility for their use of this software. Misuse of this software for malicious purposes is strictly prohibited.
