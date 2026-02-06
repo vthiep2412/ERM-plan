@@ -3,13 +3,6 @@
     "history": [
         {
             "mode": "direct",
-            "alias": "vmware",
-            "url": "wss://reforms-friday-singer-sic.trycloudflare.com",
-            "id": "",
-            "last_seen": "2026-02-05 22:29"
-        },
-        {
-            "mode": "direct",
             "alias": "ok",
             "url": "wss://gibraltar-hormone-presentation-newfoundland.trycloudflare.com",
             "id": "",
@@ -70,6 +63,13 @@
             "url": "wss://localhost:8765",
             "id": "",
             "last_seen": "2026-02-06 16:06"
+        },
+        {
+            "mode": "direct",
+            "alias": "er",
+            "url": "wss://harvey-occurrence-macro-trademark.trycloudflare.com",
+            "id": "",
+            "last_seen": "2026-02-06 21:10"
         }
     ]
 }

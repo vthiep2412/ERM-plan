@@ -112,8 +112,8 @@ class ClientManager(QMainWindow):
         # Mode Selection
         box_layout.addWidget(QLabel("Connection Mode"))
         self.mode_combo = QComboBox()
-        self.mode_combo.addItem("Broker (Render/Local)", self.MODE_BROKER)
-        self.mode_combo.addItem("Direct WebSocket", self.MODE_DIRECT)
+        # self.mode_combo.addItem("Broker (Render/Local)", self.MODE_BROKER) # Removed
+        self.mode_combo.addItem("Direct Connection", self.MODE_DIRECT)
         self.mode_combo.currentIndexChanged.connect(lambda: self.on_mode_change(self.mode_combo.currentData()))
         box_layout.addWidget(self.mode_combo)
         

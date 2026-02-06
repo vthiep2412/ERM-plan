@@ -14,12 +14,13 @@ The project is a functional prototype of a Remote Administration Tool. It uses a
 - **Protocol**: 
     - Defined in `MyDesk/core/protocol.py`.
     - Uses a mix of binary prefixes and text/JSON payloads.
-    - Extensive feature set defined: Webcam, Audio, File Manager, Shell, Clipboard, and "Troll" features.
+    - Extensive feature set defined: Webcam, Audio (Mic & System Loopback), File Manager, Shell, Clipboard, and "Troll" features.
+    - **Ghost Mode**: Agent employs "detached session" logic. Shells and Keyloggers persist across network disconnections, and output is buffered (up to 5000 items) and replayed on reconnection.
 
 ## 🔑 Key Files to Watch
 - `MyDesk/broker/server.py`: The heart of the connectivity code. Handling connection state and bridging logic here is critical.
 - `MyDesk/core/protocol.py`: The single source of truth for OpCodes. **Do not change OpCodes randomly** as it will break compatibility between Agent/Broker/Viewer.
-- `MyDesk/agent_loader.py`: The entry point. It modifies `sys.path` to load the `target` package (which likely contains the actual `agent.py` logic, though `target` folder inspection was not exhaustive in this session).
+- `MyDesk/agent_loader.py`: The entry point. It modifies `sys.path` to load the `targets` package (renamed from `target` on 2026-02-06).
 
 ## 💡 Context for Next Steps
 - **Deployment**: `MyDesk_Broker_Deploy` contains deployment scripts, likely for a VPS or cloud instance.

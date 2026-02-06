@@ -1,0 +1,14 @@
+<Configuration>
+  <VGpu>Enable</VGpu>
+  <Networking>Enable</Networking>
+  <MappedFolders>
+    <MappedFolder>
+      <HostFolder>C:\Users\vthie\.vscode\ERM-plan\MyDesk\dist</HostFolder>
+      <SandboxFolder>C:\Users\WDAGUtilityAccount\Desktop\MyDesk_Build</SandboxFolder>
+      <ReadOnly>true</ReadOnly>
+    </MappedFolder>
+  </MappedFolders>
+  <LogonCommand>
+    <Command>powershell -Command "Start-Process 'C:\Users\WDAGUtilityAccount\Desktop\MyDesk_Build'"</Command>
+  </LogonCommand>
+</Configuration>

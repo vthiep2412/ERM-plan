@@ -37,10 +37,9 @@ class ConnectionDialog(QDialog):
         self.setup_ui()
         self.current_step = 0
         self.steps = [
-            "🔌 Connecting to Broker...",
-            "🔍 Looking up Target ID...",
-            "🤝 Waiting for Handshake...",
-            "✅ Connection Established!"
+            "🔌 Connecting...",
+            "🤝 Handshaking...",
+            "✅ Connected!"
         ]
         
     def setup_ui(self):

@@ -164,7 +164,7 @@ public class Audio {{
         # Method 2: PowerShell fallback
         try:
             # Convert Python bool to PowerShell boolean string
-            ps_bool = "$true" if mute_val else "$false"
+            ps_bool = "$true" if muted else "$false"
 
             ps_script = f'''
             Add-Type -TypeDefinition @"

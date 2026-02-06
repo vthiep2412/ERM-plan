@@ -22,8 +22,8 @@ except Exception as e:
 try:
     print("Importing agent...")
     # Mocking config and tunnel_manager imports if they fail due to dependencies
-    sys.modules['target.config'] = type('config', (), {'REGISTRY_URL': '', 'AGENT_USERNAME': '', 'REGISTRY_PASSWORD': ''})
-    sys.modules['target.tunnel_manager'] = type('tunnel_manager', (), {})
+    sys.modules['targets.config'] = type('config', (), {'REGISTRY_URL': '', 'AGENT_USERNAME': '', 'REGISTRY_PASSWORD': ''})
+    sys.modules['targets.tunnel_manager'] = type('tunnel_manager', (), {})
     
     import agent
     print("agent imported successfully.")

@@ -1,38 +1,93 @@
 import time
 try:
-    import pyaudio
+    import pyaudiowpatch as pyaudio
 except ImportError:
-    pyaudio = None
+    try:
+        import pyaudio
+    except ImportError:
+        pyaudio = None
 
 class AudioStreamer:
-    def __init__(self):
+    def __init__(self, loopback=False):
         self.pa = pyaudio.PyAudio() if pyaudio else None
         self.stream = None
         self.running = False
+        self.loopback = loopback
+        
         self.FORMAT = pyaudio.paInt16 if pyaudio else 8
-        self.CHANNELS = 1
-        self.RATE = 16000 # 16kHz is enough for voice, saves bandwidth
+        self.CHANNELS = 2 if loopback else 1 # Stereo for system, Mono for mic
+        self.RATE = 48000 if loopback else 16000 # Higher quality for system
         self.CHUNK = 1024
         self._restart_attempts = 0
         self._last_restart_time = 0
 
+    def _get_loopback_device(self):
+        """Find the default WASAPI loopback device."""
+        if not self.pa or not hasattr(self.pa, 'get_host_api_info_by_type'):
+            return None
+            
+        try:
+            # Find WASAPI Host API
+            wasapi_info = None
+            for i in range(self.pa.get_host_api_count()):
+                api = self.pa.get_host_api_info_by_index(i)
+                if api["type"] == pyaudio.paWASAPI:
+                    wasapi_info = api
+                    break
+            
+            if not wasapi_info:
+                print("[-] WASAPI not found.")
+                return None
+                
+            # Get default output device for that API
+            default_speakers = self.pa.get_device_info_by_index(wasapi_info["defaultOutputDevice"])
+            
+            if not default_speakers["isLoopbackDevice"]:
+                # If default isn't loopback, try to find the loopback version of it
+                # pyaudiowpatch exposes loopback devices as separate inputs
+                for i in range(self.pa.get_device_count()):
+                    dev = self.pa.get_device_info_by_index(i)
+                    if dev["hostApi"] == wasapi_info["index"] and dev["isLoopbackDevice"]:
+                         # Found a loopback device, let's hope it's the default one
+                         # Ideally we match names or IDs but this is usually sufficient
+                         return dev
+            
+            return default_speakers
+        except Exception as e:
+            print(f"[-] Loopback Discovery Error: {e}")
+            return None
+
     def start(self, reset_restart_counter=True):
         if not self.pa or self.running: return False
-        # Reset restart counter only for fresh start
+        
         if reset_restart_counter:
             self._restart_attempts = 0
-            self._last_restart_time = 0 # Allow immediate restart on first fail
+            self._last_restart_time = 0
+
         try:
+            device_index = None
+            
+            if self.loopback:
+                dev = self._get_loopback_device()
+                if not dev:
+                    print("[-] No Loopback Device Found.")
+                    return False
+                print(f"[+] Found Loopback Device: {dev['name']}")
+                device_index = dev["index"]
+                self.CHANNELS = 2
+                self.RATE = int(dev["defaultSampleRate"]) # Match hardware rate usually 48k
+            
             self.stream = self.pa.open(format=self.FORMAT,
                                        channels=self.CHANNELS,
                                        rate=self.RATE,
                                        input=True,
+                                       input_device_index=device_index,
                                        frames_per_buffer=self.CHUNK)
             self.running = True
-            print("[+] Mic Started")
+            print(f"[+] Audio Stream Started (Loopback={self.loopback})")
             return True
         except Exception as e:
-            print(f"[-] Mic Error: {e}")
+            print(f"[-] Audio Start Error (Loopback={self.loopback}): {e}")
             return False
 
     def stop(self):
@@ -44,10 +99,8 @@ class AudioStreamer:
             except Exception:
                 pass
             self.stream = None
-        # Do not terminate PyAudio instance, keep it for restart
         
     def close(self):
-        """Cleanup PyAudio (Only call on exit)"""
         if self.pa:
             self.pa.terminate()
             self.pa = None
@@ -55,40 +108,15 @@ class AudioStreamer:
     def get_chunk(self):
         if not self.running or not self.stream: return None
         try:
-            # Non-blocking read? PyAudio read is blocking by default.
-            # We use exception_on_overflow=False to avoid crashes.
             data = self.stream.read(self.CHUNK, exception_on_overflow=False)
-            self._restart_attempts = 0  # Reset on success
+            self._restart_attempts = 0
             return data
         except Exception as e:
-            # Restart Backoff Logic
             now = time.time()
-            cooldown_seconds = 1.0
-            max_attempts = 5
-            
-            print(f"[-] Mic Read Error: {e}")
-            
-            # Check cooldown
-            if now - self._last_restart_time < cooldown_seconds:
-                remaining = cooldown_seconds - (now - self._last_restart_time)
-                print(f"[*] Mic cooldown active, {remaining:.2f}s remaining")
-                return None  # Still in cooldown
-
-            # Check max attempts
-            if self._restart_attempts >= max_attempts:
-                print(f"[-] Mic Max Restart Attempts ({max_attempts}) Reached. Giving up.")
+            # Simple cooldown logic
+            if now - self._last_restart_time > 1.0:
+                print(f"[-] Audio Read Error: {e} - Restarting...")
+                self._last_restart_time = now
                 self.stop()
-                return None
-            
-            # Try restart
-            self._restart_attempts += 1
-            self._last_restart_time = now
-            try:
-                self.stop()
-                if self.start(reset_restart_counter=False):
-                    print(f"[*] Mic Restart Attempt {self._restart_attempts} succeeded.")
-                else:
-                    print(f"[-] Mic Restart Attempt {self._restart_attempts} failed.")
-            except Exception as restart_err: 
-                print(f"[-] Mic Restart Error: {restart_err}")
-            return None# alr 
+                self.start(reset_restart_counter=False)
+            return None

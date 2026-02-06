@@ -16,26 +16,66 @@ class TunnelManager:
         self.running = False
         
     def _download_binary(self):
+        # 1. Check current directory
         if os.path.exists(CLOUDFLARED_BIN):
+            self.cloudflared_path = CLOUDFLARED_BIN
             return True
+            
+        # 2. Check globally installed (PATH)
+        import shutil
+        import tempfile
+        path_bin = shutil.which("cloudflared")
+        if path_bin:
+            print(f"[*] Found cloudflared in PATH: {path_bin}")
+            self.cloudflared_path = path_bin
+            return True
+            
+        # 3. Check Temp Directory
+        temp_dir = tempfile.gettempdir()
+        temp_bin = os.path.join(temp_dir, CLOUDFLARED_BIN)
+        if os.path.exists(temp_bin):
+             print(f"[*] Found cloudflared in TEMP: {temp_bin}")
+             self.cloudflared_path = temp_bin
+             return True
         
+        # 4. Try Download to CWD, then Fallback to TEMP
         print("[*] Downloading cloudflared...")
-        try:
-            r = requests.get(CLOUDFLARED_URL, stream=True)
-            with open(CLOUDFLARED_BIN, 'wb') as f:
-                for chunk in r.iter_content(chunk_size=8192):
-                    f.write(chunk)
-            print("[+] Download complete")
+        
+        # Helper to download to a specific path
+        def download_to(path):
+            try:
+                print(f"[*] Attempting download to: {path}")
+                r = requests.get(CLOUDFLARED_URL, stream=True, timeout=15)
+                r.raise_for_status()
+                with open(path, 'wb') as f:
+                    for chunk in r.iter_content(chunk_size=8192):
+                        f.write(chunk)
+                return True
+            except Exception as e:
+                print(f"[-] Download to {path} failed: {e}")
+                return False
+
+        # Try CWD first
+        if download_to(CLOUDFLARED_BIN):
+            print("[+] Downloaded to CWD")
+            self.cloudflared_path = CLOUDFLARED_BIN
             return True
-        except Exception as e:
-            print(f"[-] Download failed: {e}")
-            return False
+            
+        # If CWD failed, Try TEMP
+        print("[!] CWD Write Failed. Trying Temp Folder...")
+        if download_to(temp_bin):
+            print(f"[+] Downloaded to TEMP: {temp_bin}")
+            self.cloudflared_path = temp_bin
+            return True
+            
+        return False
 
     def start(self):
         if not self._download_binary():
             return None
 
-        cmd = [CLOUDFLARED_BIN, "tunnel", "--url", f"http://localhost:{self.port}"]
+        # Use the path resolved by _download_binary
+        cmd = [self.cloudflared_path, "tunnel", "--url", f"http://localhost:{self.port}"]
         
         # Prevent console window popping up
         startupinfo = None
