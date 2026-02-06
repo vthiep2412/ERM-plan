@@ -188,3 +188,4 @@ class ShellHandler:
             self.process = None
         self.current_shell = None
         self._cwd_buffer = ""
+# This line was added at the bottom to force re-check. 

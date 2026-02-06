@@ -2,7 +2,7 @@ import sys
 import os
 
 # Add target dir to path
-sys.path.append(os.path.abspath("MyDesk/target"))
+sys.path.append(os.path.abspath("MyDesk/targets"))
 
 try:
     print("Importing input_controller...")
@@ -29,3 +29,4 @@ try:
     print("agent imported successfully.")
 except Exception as e:
     print(f"FAIL: agent error: {e}")
+# This line was added at the bottom to force re-check. 

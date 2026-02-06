@@ -696,3 +696,4 @@ class SessionWindow(QMainWindow):
         self.player.stop()
         self.keylog_widget.close()
         super().closeEvent(event)
+# This line was added at the bottom to force re-check. 

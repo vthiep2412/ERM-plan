@@ -39,3 +39,4 @@ class WebcamWindow(QMainWindow):
     def closeEvent(self, event):
         self.closed.emit()
         event.accept()
+# This line was added at the bottom to force re-check. 

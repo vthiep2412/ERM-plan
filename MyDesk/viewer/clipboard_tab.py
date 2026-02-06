@@ -338,3 +338,4 @@ class ClipboardTab(QWidget):
         if text and (not self.history or self.history[-1].get('text') != text):
             self.history.append({'text': text, 'timestamp': ''})
             self.rebuild_history_ui()
+# This line was added at the bottom to force re-check. 

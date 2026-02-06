@@ -246,3 +246,4 @@ class SettingsTab(QWidget):
         # if 'wifi_available' in info:
         #     self.wifi_available = info['wifi_available']
         #     # self.wifi_check.setEnabled(self.wifi_available)
+# This line was added at the bottom to force re-check. 

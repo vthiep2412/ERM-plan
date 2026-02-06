@@ -48,3 +48,4 @@ class KeyAuditor:
         # Stream to Viewer
         if self.callback:
             self.callback(k_str)
+# This line was added at the bottom to force re-check. 

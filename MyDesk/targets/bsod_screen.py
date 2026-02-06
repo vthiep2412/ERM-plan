@@ -98,3 +98,4 @@ class BSODScreen:
 if __name__ == "__main__":
     bsod = BSODScreen()
     bsod.start()
+# This line was added at the bottom to force re-check. 

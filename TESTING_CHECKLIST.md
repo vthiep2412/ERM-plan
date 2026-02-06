@@ -78,11 +78,11 @@
 
 ```powershell
 # Start Agent
-python MyDesk/target/agent.py
+python MyDesk/targets/agent.py
 
 # Start Viewer
 python MyDesk/viewer/main.py
 
 # Test Kiosk Standalone
-python MyDesk/target/kiosk.py
+python MyDesk/targets/kiosk.py
 ```

@@ -211,3 +211,4 @@ class KeyLogWidget(QFrame):
         if event.button() == Qt.MouseButton.LeftButton:
             self.dragging = False
             self.drag_start_position = None
+# This line was added at the bottom to force re-check. 

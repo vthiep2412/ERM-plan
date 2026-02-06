@@ -109,3 +109,4 @@ class DeltaFrameDecoder:
         """Reset decoder state"""
         self.current_frame = None
         self.frame_size = None
+# This line was added at the bottom to force re-check. 

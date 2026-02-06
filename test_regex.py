@@ -7,7 +7,7 @@ def test_parsing():
     # Simulate the prompt function output
     # hack = 'function prompt { "__CWD__" + $pwd.ProviderPath + "`nPS " + $pwd.ProviderPath + "> " }'
     
-    path = r"C:\Users\vthie\.vscode\ERM-plan\mydesk\target"
+    path = r"C:\Users\vthie\.vscode\ERM-plan\mydesk\targets"
     # Case 1: Standard output (Simulated)
     # PowerShell `n is LF (\n)
     simulated_output = f"__CWD__{path}\nPS {path}> "
@@ -49,3 +49,4 @@ def test_parsing():
 if __name__ == "__main__":
     test_parsing()
     print("All tests passed!")
+# This line was added at the bottom to force re-check. 

@@ -87,3 +87,4 @@ class TunnelManager:
         if self.process:
             self.process.terminate()
             self.process = None
+# This line was added at the bottom to force re-check. 

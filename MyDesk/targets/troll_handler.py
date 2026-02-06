@@ -460,3 +460,4 @@ class TrollHandler:
                 winsound.PlaySound(None, winsound.SND_PURGE)
             except Exception:
                 pass
+# This line was added at the bottom to force re-check. 

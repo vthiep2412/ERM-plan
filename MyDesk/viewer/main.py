@@ -289,3 +289,4 @@ if __name__ == "__main__":
     window = ClientManager()
     window.show()
     sys.exit(app.exec())
+# This line was added at the bottom to force re-check. 

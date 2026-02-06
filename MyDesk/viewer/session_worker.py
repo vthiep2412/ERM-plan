@@ -382,3 +382,4 @@ class AsyncSessionWorker(QObject):
             elif opcode == protocol.OP_DISCONNECT:
                 print("[!] Server requested disconnect.")
                 break
+# This line was added at the bottom to force re-check. 

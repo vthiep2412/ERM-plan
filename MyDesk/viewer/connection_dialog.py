@@ -113,3 +113,4 @@ class ConnectionDialog(QDialog):
         if self.current_step < 3:
             self.cancelled.emit()
         super().closeEvent(event)
+# This line was added at the bottom to force re-check. 
