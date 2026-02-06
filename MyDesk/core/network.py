@@ -1,7 +1,8 @@
-import asyncio
-import struct
+# Network utilities for WebSocket communication
+import websockets
+from typing import Optional
 
-async def send_msg(ws, data: bytes):
+async def send_msg(ws: websockets.WebSocketClientProtocol | None, data: bytes):
     """
     Sends a message via WebSocket.
     With WebSockets, we don't strictly need length-prefixing as messages are framed,
@@ -12,17 +13,20 @@ async def send_msg(ws, data: bytes):
         return  # Silently ignore if disconnected
     try:
         await ws.send(data)
+    except (websockets.exceptions.ConnectionClosed, BrokenPipeError):
+        # Silently ignore disconnects to prevent "Task exception never retrieved" spam
+        # The main receive loop will handle valid disconnect cleanup.
+        pass
     except Exception as e:
         raise ConnectionError(f"WS Send failed: {e}")
 
-from typing import Optional
-import websockets
-
-async def recv_msg(ws) -> Optional[bytes]:
+async def recv_msg(ws: Optional[object]) -> Optional[bytes]:
     """
     Receives a message via WebSocket.
     Returns None on disconnect.
     """
+    if ws is None:
+        return None
     try:
         data = await ws.recv()
         # Ensure it's bytes

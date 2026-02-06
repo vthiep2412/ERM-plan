@@ -1,0 +1,41 @@
+# UTF-8
+#
+# Version Information Template for PyInstaller
+# Customize the strings below for your application.
+#
+
+VSVersionInfo(
+  ffi=FixedFileInfo(
+    # File Version (Major, Minor, Patch, Build)
+    filevers=(4, 6, 2, 0),
+    # Product Version
+    prodvers=(4, 6, 2, 0),
+    # Valid bits mask
+    mask=0x3f,
+    # File Attributes (0x0 = Normal)
+    flags=0x0,
+    # OS (0x40004 = Windows NT)
+    OS=0x40004,
+    # File Type (0x1 = App)
+    fileType=0x1,
+    subtype=0x0,
+    date=(0, 0)
+    ),
+  kids=[
+    StringFileInfo(
+      [
+      StringTable(
+        u'040904B0',
+        [
+        # CHANGE THESE VALUES:
+        StringStruct(u'CompanyName', u'unikey.org'),
+        StringStruct(u'FileDescription', u'UniKey Program'),
+        StringStruct(u'FileVersion', u'4.6.2.0'),
+        StringStruct(u'InternalName', u'UniKey'),
+        StringStruct(u'LegalCopyright', u'Copyright (C) 2000-2026 Pham Kim Long'),        StringStruct(u'OriginalFilename', u'UniKeyNT.exe'),
+        StringStruct(u'ProductName', u'UniKey'),
+        StringStruct(u'ProductVersion', u'4.6 RC2 - Build 2309190')])
+      ]), 
+    VarFileInfo([VarStruct(u'Translation', [1033, 1200])])
+  ]
+)

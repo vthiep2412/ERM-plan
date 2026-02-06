@@ -3,11 +3,10 @@ Privacy Curtain Dialog for MyDesk Viewer
 Allows user to obscure the remote screen with black or custom image.
 """
 import os
-import json
 import shutil
 from PyQt6.QtWidgets import (QDialog, QVBoxLayout, QHBoxLayout, QLabel, 
                              QPushButton, QListWidget, QListWidgetItem,
-                             QFileDialog, QWidget)
+                             QFileDialog)
 from PyQt6.QtGui import QPixmap, QIcon
 from PyQt6.QtCore import Qt, pyqtSignal, QSize
 
@@ -15,7 +14,7 @@ from PyQt6.QtCore import Qt, pyqtSignal, QSize
 CURTAIN_DIR = os.path.join(os.path.expanduser("~"), ".mydesk", "curtains")
 
 class CurtainDialog(QDialog):
-    curtain_selected = pyqtSignal(str, object)  # type ("BLACK" or "IMAGE"), data (None or path)
+    curtain_selected = pyqtSignal(str, object) # type ("BLACK", "IMAGE", or "FAKE_UPDATE"), data (None or path)
     
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -34,6 +33,11 @@ class CurtainDialog(QDialog):
             QPushButton:hover { background-color: #505050; }
             QPushButton#blackBtn { background-color: #2D2D30; border: 2px solid #666; }
             QPushButton#blackBtn:hover { border-color: #007ACC; }
+            QPushButton#fakeBtn { 
+                background-color: #006dae; 
+                font-weight: bold; 
+            }
+            QPushButton#fakeBtn:hover { background-color: #0088dd; }
             QListWidget { 
                 background-color: #2D2D30; 
                 border: 1px solid #3E3E42;
@@ -57,6 +61,13 @@ class CurtainDialog(QDialog):
         black_btn.setMinimumHeight(50)
         black_btn.clicked.connect(lambda: self.select_curtain("BLACK", None))
         layout.addWidget(black_btn)
+
+        # Fake Update Option
+        fake_btn = QPushButton("🔄 Fake Update Screen")
+        fake_btn.setObjectName("fakeBtn")
+        fake_btn.setMinimumHeight(50)
+        fake_btn.clicked.connect(lambda: self.select_curtain("FAKE_UPDATE", None))
+        layout.addWidget(fake_btn)
         
         # Divider
         divider = QLabel("─── OR select a custom image ───")

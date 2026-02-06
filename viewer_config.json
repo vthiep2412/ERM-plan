@@ -5,6 +5,13 @@
             "id": "52227878594",
             "last_seen": "2026-02-01 20:22",
             "username": "Unknown"
+        },
+        {
+            "mode": "broker",
+            "alias": "Unnamed",
+            "url": "wss://render-broker.onrender.com",
+            "id": "52227878594",
+            "last_seen": "2026-02-04 20:33"
         }
     ]
 }

@@ -1,6 +1,6 @@
-from PyQt6.QtWidgets import QWidget, QLabel, QVBoxLayout, QPlainTextEdit, QFrame
-from PyQt6.QtCore import Qt, pyqtSignal, QEvent
-from PyQt6.QtGui import QPixmap, QImage
+from PyQt6.QtWidgets import QLabel, QVBoxLayout, QPlainTextEdit, QFrame
+from PyQt6.QtCore import Qt, pyqtSignal
+from PyQt6.QtGui import QPixmap
 
 # Import delta decoder
 try:
@@ -13,6 +13,9 @@ class VideoCanvas(QLabel):
     Renders the remote screen. Handles Aspect Ratio and Delta Frames.
     """
     input_signal = pyqtSignal(object)
+    
+    # Maximum scroll step for protocol safety
+    MAX_SCROLL_STEP = 20
 
     def __init__(self):
         super().__init__()
@@ -23,6 +26,10 @@ class VideoCanvas(QLabel):
         
         self.original_pixmap = None
         self.decoder = DeltaFrameDecoder() if DeltaFrameDecoder else None
+        
+        # Scroll Accumulators for High-Precision Mice
+        self._scroll_accum_x = 0
+        self._scroll_accum_y = 0
 
     def update_frame(self, data: bytes):
         """Loads frame data (supports keyframe and delta)"""
@@ -44,6 +51,27 @@ class VideoCanvas(QLabel):
         # Scale to window size
         scaled = pix.scaled(self.size(), Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation)
         self.setPixmap(scaled)
+
+    def update_frame_numpy(self, frame):
+        """Update frame from numpy array (WebRTC video track)"""
+        try:
+            from PyQt6.QtGui import QImage
+            
+            # frame is RGB24 numpy array from av.VideoFrame.to_ndarray(format='rgb24')
+            height, width, channels = frame.shape
+            bytes_per_line = channels * width
+            
+            # Create QImage from numpy array
+            qimg = QImage(frame.data, width, height, bytes_per_line, QImage.Format.Format_RGB888)
+            pix = QPixmap.fromImage(qimg)
+            
+            self.original_pixmap = pix
+            
+            # Scale to window size
+            scaled = pix.scaled(self.size(), Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation)
+            self.setPixmap(scaled)
+        except Exception as e:
+            print(f"[-] WebRTC frame display error: {e}")
 
     def resizeEvent(self, event):
         if self.original_pixmap:
@@ -99,6 +127,37 @@ class VideoCanvas(QLabel):
         key = e.key()
         self.input_signal.emit(('key', key, False))
 
+    def wheelEvent(self, e):
+        # Accumulate deltas
+        # Qt standard: 120 units = 1 step
+        self._scroll_accum_x += e.angleDelta().x()
+        self._scroll_accum_y += e.angleDelta().y()
+        
+        # Calculate full steps from accumulator
+        steps_x = int(self._scroll_accum_x / 120)
+        steps_y = int(self._scroll_accum_y / 120)
+        
+        # Clamp steps using class constant
+        clamped_x = max(-self.MAX_SCROLL_STEP, min(self.MAX_SCROLL_STEP, steps_x))
+        clamped_y = max(-self.MAX_SCROLL_STEP, min(self.MAX_SCROLL_STEP, steps_y))
+        
+        # Consume FULL computed steps to drain accumulator (no leftover energy)
+        if clamped_x != 0:
+            self._scroll_accum_x -= steps_x * 120
+        else:
+            # Decay if no step triggered (deadzone)
+            if abs(self._scroll_accum_x) < 30: self._scroll_accum_x = 0
+
+        if clamped_y != 0:
+            self._scroll_accum_y -= steps_y * 120
+        else:
+            if abs(self._scroll_accum_y) < 30: self._scroll_accum_y = 0
+        
+        # Emit only if we have clamped steps
+        if clamped_x != 0 or clamped_y != 0:
+            self.input_signal.emit(('scroll', clamped_x, clamped_y))
+        
+        e.accept()  # Always accept to prevent parent widget propagation
 
 class KeyLogWidget(QFrame):
     """

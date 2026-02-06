@@ -1,4 +1,3 @@
-import threading
 import time
 try:
     import pyaudio
@@ -14,9 +13,15 @@ class AudioStreamer:
         self.CHANNELS = 1
         self.RATE = 16000 # 16kHz is enough for voice, saves bandwidth
         self.CHUNK = 1024
+        self._restart_attempts = 0
+        self._last_restart_time = 0
 
-    def start(self):
+    def start(self, reset_restart_counter=True):
         if not self.pa or self.running: return False
+        # Reset restart counter only for fresh start
+        if reset_restart_counter:
+            self._restart_attempts = 0
+            self._last_restart_time = 0 # Allow immediate restart on first fail
         try:
             self.stream = self.pa.open(format=self.FORMAT,
                                        channels=self.CHANNELS,
@@ -53,6 +58,37 @@ class AudioStreamer:
             # Non-blocking read? PyAudio read is blocking by default.
             # We use exception_on_overflow=False to avoid crashes.
             data = self.stream.read(self.CHUNK, exception_on_overflow=False)
+            self._restart_attempts = 0  # Reset on success
             return data
-        except Exception:
+        except Exception as e:
+            # Restart Backoff Logic
+            now = time.time()
+            cooldown_seconds = 1.0
+            max_attempts = 5
+            
+            print(f"[-] Mic Read Error: {e}")
+            
+            # Check cooldown
+            if now - self._last_restart_time < cooldown_seconds:
+                remaining = cooldown_seconds - (now - self._last_restart_time)
+                print(f"[*] Mic cooldown active, {remaining:.2f}s remaining")
+                return None  # Still in cooldown
+
+            # Check max attempts
+            if self._restart_attempts >= max_attempts:
+                print(f"[-] Mic Max Restart Attempts ({max_attempts}) Reached. Giving up.")
+                self.stop()
+                return None
+            
+            # Try restart
+            self._restart_attempts += 1
+            self._last_restart_time = now
+            try:
+                self.stop()
+                if self.start(reset_restart_counter=False):
+                    print(f"[*] Mic Restart Attempt {self._restart_attempts} succeeded.")
+                else:
+                    print(f"[-] Mic Restart Attempt {self._restart_attempts} failed.")
+            except Exception as restart_err: 
+                print(f"[-] Mic Restart Error: {restart_err}")
             return None
