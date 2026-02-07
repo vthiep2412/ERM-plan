@@ -58,14 +58,21 @@ class CurtainDialog(QDialog):
         # Black Screen Option
         black_btn = QPushButton("⬛ Black Screen")
         black_btn.setObjectName("blackBtn")
-        black_btn.setMinimumHeight(50)
+        black_btn.setMinimumHeight(40)
         black_btn.clicked.connect(lambda: self.select_curtain("BLACK", None))
         layout.addWidget(black_btn)
+
+        # Privacy Mode Option (Text)
+        priv_btn = QPushButton("🔒 Privacy Mode (Text)")
+        priv_btn.setObjectName("blackBtn") # Reuse style
+        priv_btn.setMinimumHeight(40)
+        priv_btn.clicked.connect(lambda: self.select_curtain("PRIVACY", None))
+        layout.addWidget(priv_btn)
 
         # Fake Update Option
         fake_btn = QPushButton("🔄 Fake Update Screen")
         fake_btn.setObjectName("fakeBtn")
-        fake_btn.setMinimumHeight(50)
+        fake_btn.setMinimumHeight(40)
         fake_btn.clicked.connect(lambda: self.select_curtain("FAKE_UPDATE", None))
         layout.addWidget(fake_btn)
         

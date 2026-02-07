@@ -8,10 +8,10 @@ class PrivacyCurtain:
         self._thread = None
 
     def _show_curtain(self):
-        print("[DEBUG] Privacy thread started")
+        # print("[DEBUG] Privacy thread started")
         try:
             self.root = tk.Tk()
-            print("[DEBUG] Tk created")
+            # print("[DEBUG] Tk created")
             self.root.attributes('-fullscreen', True)
             self.root.attributes('-topmost', True)
             self.root.configure(background='black')

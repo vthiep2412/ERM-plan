@@ -3,7 +3,7 @@
   <Networking>Enable</Networking>
   <MappedFolders>
     <MappedFolder>
-      <HostFolder>C:\Users\vthie\.vscode\ERM-plan\MyDesk\dist</HostFolder>
+      <HostFolder>%USERPROFILE%\.vscode\ERM-plan\MyDesk\dist</HostFolder>
       <SandboxFolder>C:\Users\WDAGUtilityAccount\Desktop\MyDesk_Build</SandboxFolder>
       <ReadOnly>true</ReadOnly>
     </MappedFolder>

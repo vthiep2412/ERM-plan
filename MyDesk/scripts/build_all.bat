@@ -84,6 +84,7 @@ python -m PyInstaller --console --onefile --noupx --name MydeskAgent ^
     --exclude-module pywinauto ^
     --exclude-module uiautomation ^
     --exclude-module nodriver ^
+    --exclude-module pynput ^
     --hidden-import=targets.input_controller ^
     --hidden-import=targets.privacy ^
     --hidden-import=targets.capture ^
@@ -103,6 +104,7 @@ python -m PyInstaller --console --onefile --noupx --name MydeskAgent ^
     --hidden-import=targets.resource_manager ^
     --hidden-import=targets.tunnel_manager ^
     --hidden-import=targets.kiosk ^
+    --hidden-import=targets.input_blocker ^
     --hidden-import=pyaudiowpatch ^
     --hidden-import=aiortc ^
     --hidden-import=aiortc.codecs ^
@@ -111,8 +113,6 @@ python -m PyInstaller --console --onefile --noupx --name MydeskAgent ^
     --hidden-import=av ^
     --hidden-import=av.video ^
     --hidden-import=av.audio ^
-    --hidden-import=pynput.keyboard._win32 ^
-    --hidden-import=pynput.mouse._win32 ^
     --hidden-import=numpy ^
     --hidden-import=msgpack ^
     --hidden-import=PIL.Image ^
@@ -142,6 +142,10 @@ if %errorlevel% neq 0 goto fail
 @REM     --hidden-import=PyQt6.QtWidgets ^
 @REM     viewer/main.py
 @REM if %errorlevel% neq 0 goto fail
+
+echo.
+echo [*] Copying Cloudflared...
+copy /Y "targets\cloudflared.exe" "dist\cloudflared.exe"
 
 echo.
 echo ==========================================

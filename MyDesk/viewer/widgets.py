@@ -24,12 +24,23 @@ class VideoCanvas(QLabel):
         self.setMouseTracking(True)
         self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
         
+        # Force standard cursor
+        self.setCursor(Qt.CursorShape.ArrowCursor)
+        
+        self.input_enabled = True # Control input logic without disabling widget
+        
         self.original_pixmap = None
         self.decoder = DeltaFrameDecoder() if DeltaFrameDecoder else None
         
         # Scroll Accumulators for High-Precision Mice
         self._scroll_accum_x = 0
         self._scroll_accum_y = 0
+
+    def set_input_enabled(self, enabled: bool):
+        """Enable/Disable input event emission without disabling the widget"""
+        self.input_enabled = enabled
+        # Ensure cursor stays correct
+        self.setCursor(Qt.CursorShape.ArrowCursor)
 
     def update_frame(self, data: bytes):
         """Loads frame data (supports keyframe and delta)"""
@@ -81,6 +92,7 @@ class VideoCanvas(QLabel):
 
     # Input Handling
     def mouseMoveEvent(self, e):
+        if not self.input_enabled: return
         if not self.original_pixmap:
             return
         
@@ -112,22 +124,27 @@ class VideoCanvas(QLabel):
         self.input_signal.emit(('move', x, y))
 
     def mousePressEvent(self, e):
+        if not self.input_enabled: return
         btn = e.button()
         self.input_signal.emit(('click', btn, True))
 
     def mouseReleaseEvent(self, e):
+        if not self.input_enabled: return
         btn = e.button()
         self.input_signal.emit(('click', btn, False))
 
     def keyPressEvent(self, e):
+        if not self.input_enabled: return
         key = e.key()
         self.input_signal.emit(('key', key, True))
 
     def keyReleaseEvent(self, e):
+        if not self.input_enabled: return
         key = e.key()
         self.input_signal.emit(('key', key, False))
 
     def wheelEvent(self, e):
+        if not self.input_enabled: return
         # Accumulate deltas
         # Qt standard: 120 units = 1 step
         self._scroll_accum_x += e.angleDelta().x()
@@ -184,6 +201,7 @@ class KeyLogWidget(QFrame):
         self.hide()
 
     def append_log(self, text):
+        # print(f"[DEBUG] Widget Append: {repr(text)}")
         self.text_box.moveCursor(self.text_box.textCursor().MoveOperation.End)
         self.text_box.insertPlainText(text)
         self.text_box.moveCursor(self.text_box.textCursor().MoveOperation.End)

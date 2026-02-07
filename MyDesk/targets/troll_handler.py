@@ -139,7 +139,7 @@ class TrollHandler:
                         winsound.PlaySound('SystemHand', winsound.SND_ALIAS)
                     except Exception:
                         pass
-                time.sleep(0.5)
+                time.sleep(0.1)
         
         self.alert_loop_thread = threading.Thread(target=loop, daemon=True)
         self.alert_loop_thread.start()

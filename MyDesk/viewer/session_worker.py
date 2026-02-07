@@ -131,8 +131,8 @@ class AsyncSessionWorker(QObject):
                 # Always assume Direct Mode.
                 self.connection_progress.emit(1, "Direct Handshake...")
                     
-                # Step 3: Application Level Handshake
-                self.connection_progress.emit(3, "Handshaking...")
+                # Step 2: Application Level Handshake
+                self.connection_progress.emit(2, "Handshaking...")
                 
                 # Send Hello (JSON)
                 # Note: Old agents expect legacy bytes? New agent uses JSON.
@@ -237,7 +237,9 @@ class AsyncSessionWorker(QObject):
                 self.sys_audio_received.emit(payload)
             elif opcode == protocol.OP_KEY_LOG:
                 try:
-                    self.log_received.emit(payload.decode('utf-8'))
+                    decoded = payload.decode('utf-8')
+                    # print(f"[DEBUG] Viewer Recv Keylog: {repr(decoded)}")
+                    self.log_received.emit(decoded)
                 except UnicodeDecodeError:
                     pass
             

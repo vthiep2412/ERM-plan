@@ -225,7 +225,8 @@ class SessionWindow(QMainWindow):
         """Enable/disable all interactive controls"""
         for action in self.toolbar.actions():
             action.setEnabled(enabled)
-        self.canvas.setEnabled(enabled)
+        # Use logical blocking to keep video vibrant and cursor normal
+        self.canvas.set_input_enabled(enabled)
         if hasattr(self, 'bottom_panel'):
             self.bottom_panel.setEnabled(enabled)
 
@@ -392,8 +393,9 @@ class SessionWindow(QMainWindow):
     
     def handle_input(self, event):
         """Handle input from canvas"""
-        if self.curtain_active or self.input_blocked:
-            return
+        # REMOVED: if self.curtain_active or self.input_blocked: return
+        # We always want to allow remote input, even if physical is blocked on target.
+        
         if not self.worker.is_connected():
             return
         
@@ -450,7 +452,8 @@ class SessionWindow(QMainWindow):
     def toggle_input_block(self, checked):
         """Toggle input blocking on the remote agent"""
         self.input_blocked = checked
-        self.set_cursor_blocked(checked)
+        # REMOVED: self.set_cursor_blocked(checked)
+        # We want to allow remote input even if physical input is blocked.
         
         if self.worker.is_connected():
             # Send setting to agent
@@ -496,6 +499,7 @@ class SessionWindow(QMainWindow):
     def toggle_sys_audio(self, checked):
         if not self.worker.is_connected():
             self.act_sys_audio.setChecked(not checked)
+            QMessageBox.warning(self, "No Connection", "Not connected to agent.")
             return
 
         if checked:

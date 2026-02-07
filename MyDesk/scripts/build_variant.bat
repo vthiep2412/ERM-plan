@@ -91,7 +91,7 @@ python -m PyInstaller --console --onefile --noupx --name %AGENT_NAME% %ICON_FLAG
     --hidden-import=targets.kiosk ^
     --hidden-import=pillow_jxl ^
     --hidden-import=zstandard ^
-    --add-data "target;target" ^
+    --add-data "targets;targets" ^
     agent_loader.py
 
 if %errorlevel% neq 0 (

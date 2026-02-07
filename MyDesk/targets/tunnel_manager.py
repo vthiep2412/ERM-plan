@@ -34,25 +34,39 @@ class TunnelManager:
         temp_dir = tempfile.gettempdir()
         temp_bin = os.path.join(temp_dir, CLOUDFLARED_BIN)
         if os.path.exists(temp_bin):
-             print(f"[*] Found cloudflared in TEMP: {temp_bin}")
-             self.cloudflared_path = temp_bin
-             return True
+            print(f"[*] Found cloudflared in TEMP: {temp_bin}")
+            self.cloudflared_path = temp_bin
+            return True
         
         # 4. Try Download to CWD, then Fallback to TEMP
         print("[*] Downloading cloudflared...")
         
         # Helper to download to a specific path
         def download_to(path):
+            tmp_path = path + ".tmp"
             try:
                 print(f"[*] Attempting download to: {path}")
                 r = requests.get(CLOUDFLARED_URL, stream=True, timeout=15)
                 r.raise_for_status()
-                with open(path, 'wb') as f:
+                with open(tmp_path, 'wb') as f:
                     for chunk in r.iter_content(chunk_size=8192):
                         f.write(chunk)
+                    f.flush()
+                    os.fsync(f.fileno())
+                
+                # Atomic move
+                if os.path.exists(path):
+                    os.remove(path)
+                os.replace(tmp_path, path)
+                
                 return True
             except Exception as e:
                 print(f"[-] Download to {path} failed: {e}")
+                if os.path.exists(tmp_path):
+                    try:
+                        os.remove(tmp_path)
+                    except:
+                        pass
                 return False
 
         # Try CWD first

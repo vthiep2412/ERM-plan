@@ -31,7 +31,7 @@ class AudioStreamer:
             wasapi_info = None
             for i in range(self.pa.get_host_api_count()):
                 api = self.pa.get_host_api_info_by_index(i)
-                if api["type"] == pyaudio.paWASAPI:
+                if hasattr(pyaudio, "paWASAPI") and api["type"] == pyaudio.paWASAPI:
                     wasapi_info = api
                     break
             
@@ -52,7 +52,7 @@ class AudioStreamer:
                          # Ideally we match names or IDs but this is usually sufficient
                          return dev
             
-            return default_speakers
+            return None
         except Exception as e:
             print(f"[-] Loopback Discovery Error: {e}")
             return None
