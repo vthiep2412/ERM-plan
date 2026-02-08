@@ -98,16 +98,24 @@ class InputController:
         self._send_input(command)
 
     def scroll(self, dx, dy):
-        """Scroll using MOUSEEVENTF_WHEEL"""
-        ii_ = Input_I()
+        """Scroll using MOUSEEVENTF_WHEEL and MOUSEEVENTF_HWHEEL"""
+        # Standard Scroll Amount (1 notch = 120)
+        WHEEL_DELTA = 120
         
-        # dy is usually 120 units. Our Viewer sends raw pixel deltas, need to scale? 
-        # Usually 1 click = 120.
-        ii_.mi = MouseInput(0, 0, dy, 0x0800, 0, ctypes.c_void_p(INJECTED_SIGNATURE)) # 0x0800 = MOUSEEVENTF_WHEEL
-        # debug_log(f"Scroll: dy={dy} (Sig: {hex(INJECTED_SIGNATURE)})")
+        # Vertical Scroll
+        if dy != 0:
+            ii_ = Input_I()
+            ii_.mi = MouseInput(0, 0, dy * WHEEL_DELTA, MOUSEEVENTF_WHEEL, 0, ctypes.c_void_p(INJECTED_SIGNATURE))
+            command = Input(ctypes.c_ulong(0), ii_)
+            self._send_input(command)
         
-        command = Input(ctypes.c_ulong(0), ii_)
-        self._send_input(command)
+        # Horizontal Scroll
+        if dx != 0:
+            ii_ = Input_I()
+            # 0x01000 = MOUSEEVENTF_HWHEEL
+            ii_.mi = MouseInput(0, 0, dx * WHEEL_DELTA, 0x1000, 0, ctypes.c_void_p(INJECTED_SIGNATURE))
+            command = Input(ctypes.c_ulong(0), ii_)
+            self._send_input(command)
         
     def press_key(self, key_code, pressed):
         """Press key using ScanCode or VirtualKey"""
