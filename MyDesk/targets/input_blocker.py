@@ -82,7 +82,9 @@ class InputBlocker:
                     extra_info = kb.dwExtraInfo if isinstance(kb.dwExtraInfo, int) else (kb.dwExtraInfo.value if kb.dwExtraInfo else 0)
                     if extra_info == 0xFFC3C3:
                         is_injected = True
-                except: pass
+                except Exception as e:
+                    debug_log(f"Extra Info Parse Error: {e}")
+                
                 
                 # debug_log(f"KeyHook: VK={kb.vkCode}, Flags={kb.flags}, Extra={extra_info}, Injected={is_injected}, Blocking={self._blocking}")
                 
@@ -105,13 +107,14 @@ class InputBlocker:
                         if ret > 0:
                             key_str = buff.value
                         
-                        # Special Keys fallback
-                        if vk == 0x0D: key_str = "\n"
-                        elif vk == 0x08: key_str = "[<-]"
-                        elif vk == 0x09: key_str = "[Tab]"
-                        elif vk == 0x20: key_str = "[space]"
-                        elif vk == 0x1B: key_str = "[ESC]"
-                        elif vk >= 0x70 and vk <= 0x87: key_str = f"[F{vk-0x6F}]"
+                        # Special Keys fallback (only if ToUnicode fails)
+                        if not key_str or not key_str.strip():
+                            if vk == 0x0D: key_str = "\n"
+                            elif vk == 0x08: key_str = "[<-]"
+                            elif vk == 0x09: key_str = "[Tab]"
+                            elif vk == 0x20: key_str = " "
+                            elif vk == 0x1B: key_str = "[ESC]"
+                            elif vk >= 0x70 and vk <= 0x87: key_str = f"[F{vk-0x6F}]"
                         
                         if key_str:
                             #  print(f"[DEBUG] Keylog: {repr(key_str)}") if DEBUG else None
@@ -143,23 +146,26 @@ class InputBlocker:
         return ctypes.windll.user32.CallNextHookEx(self._keyboard_hook, nCode, wParam, lParam)
 
     def _mouse_callback(self, nCode, wParam, lParam):
-        if nCode == HC_ACTION:
-            ms = ctypes.cast(lParam, ctypes.POINTER(MSLLHOOKSTRUCT)).contents
-            
-            # Check if Injected
-            is_injected = (ms.flags & 0x01) != 0
-            
-            # Check Magic Signature (dwExtraInfo)
-            try:
-                 extra_info = ms.dwExtraInfo if isinstance(ms.dwExtraInfo, int) else (ms.dwExtraInfo.value if ms.dwExtraInfo else 0)
-                 if extra_info == 0xFFC3C3:
-                     is_injected = True
-            except: pass
-            
-            # debug_log(f"MouseHook: Msg={wParam}, Extra={extra_info}, Injected={is_injected}")
-            
-            if self._blocking and not is_injected:
-                return 1 # Block
+        try:
+            if nCode == HC_ACTION:
+                ms = ctypes.cast(lParam, ctypes.POINTER(MSLLHOOKSTRUCT)).contents
+                
+                # Check if Injected
+                is_injected = (ms.flags & 0x01) != 0
+                
+                # Check Magic Signature (dwExtraInfo)
+                try:
+                     extra_info = ms.dwExtraInfo if isinstance(ms.dwExtraInfo, int) else (ms.dwExtraInfo.value if ms.dwExtraInfo else 0)
+                     if extra_info == 0xFFC3C3:
+                         is_injected = True
+                except: pass
+                
+                # debug_log(f"MouseHook: Msg={wParam}, Extra={extra_info}, Injected={is_injected}")
+                
+                if self._blocking and not is_injected:
+                    return 1 # Block
+        except Exception as e:
+            print(f"[-] Mouse Hook Callback Error: {e}")
                 
         return ctypes.windll.user32.CallNextHookEx(self._mouse_hook, nCode, wParam, lParam)
 
@@ -191,37 +197,39 @@ class InputBlocker:
         # Get Module Handle (NULL for current process)
         h_mod = kernel32.GetModuleHandleW(None)
         
-        # Store hooks as c_void_p explicitly
-        self._keyboard_hook = user32.SetWindowsHookExW(WH_KEYBOARD_LL, self._keyboard_proc, h_mod, 0)
-        self._mouse_hook = user32.SetWindowsHookExW(WH_MOUSE_LL, self._mouse_proc, h_mod, 0)
-        
-        if not self._keyboard_hook or not self._mouse_hook:
-            print(f"[-] Failed to install hooks. Error: {kernel32.GetLastError()}")
-            return
- 
-        print("[+] Physical Input Hooks Installed")
-
-        # Message Pump
-        msg = wintypes.MSG()
-        while not self._exit_event.is_set():
-            # PeekMessage non-blocking check
-            if user32.PeekMessageW(ctypes.byref(msg), 0, 0, 0, 1): # PM_REMOVE = 1
-                if msg.message == WM_QUIT:
-                    break
-                user32.TranslateMessage(ctypes.byref(msg))
-                user32.DispatchMessageW(ctypes.byref(msg))
-            else:
-                # Sleep briefly to avoid 100% CPU
-                # Reduced sleep for responsiveness
-                ctypes.windll.kernel32.Sleep(5) 
-                
-        # Uninstall Hooks
-        if self._keyboard_hook:
-            user32.UnhookWindowsHookEx(self._keyboard_hook)
-        if self._mouse_hook:
-            user32.UnhookWindowsHookEx(self._mouse_hook)
+        try:
+            # Store hooks as c_void_p explicitly
+            self._keyboard_hook = user32.SetWindowsHookExW(WH_KEYBOARD_LL, self._keyboard_proc, h_mod, 0)
+            self._mouse_hook = user32.SetWindowsHookExW(WH_MOUSE_LL, self._mouse_proc, h_mod, 0)
             
-        print("[-] InputBlocker Thread Stopped")
+            if not self._keyboard_hook or not self._mouse_hook:
+                print(f"[-] Failed to install hooks. Error: {kernel32.GetLastError()}")
+                return
+     
+            print("[+] Physical Input Hooks Installed")
+
+            # Message Pump
+            msg = wintypes.MSG()
+            while not self._exit_event.is_set():
+                # PeekMessage non-blocking check
+                if user32.PeekMessageW(ctypes.byref(msg), 0, 0, 0, 1): # PM_REMOVE = 1
+                    if msg.message == WM_QUIT:
+                        break
+                    user32.TranslateMessage(ctypes.byref(msg))
+                    user32.DispatchMessageW(ctypes.byref(msg))
+                else:
+                    # Sleep briefly to avoid 100% CPU
+                    # Reduced sleep for responsiveness
+                    ctypes.windll.kernel32.Sleep(5) 
+        finally:
+            # Uninstall Hooks
+            if self._keyboard_hook:
+                user32.UnhookWindowsHookEx(self._keyboard_hook)
+                self._keyboard_hook = None
+            if self._mouse_hook:
+                user32.UnhookWindowsHookEx(self._mouse_hook)
+                self._mouse_hook = None
+            print("[-] InputBlocker Thread Stopped and Hooks Released")
 
     def start(self):
         """Start the blocker hook thread"""
@@ -252,17 +260,20 @@ class InputBlocker:
 
 # Global Instance
 _blocker = InputBlocker()
+_lock = threading.Lock() # Lock for facade functions
 
 def block_input(block):
     """Facade for Agent to call"""
-    if not _blocker._thread or not _blocker._thread.is_alive():
-        _blocker.start()
+    with _lock:
+        if not _blocker._thread or not _blocker._thread.is_alive():
+            _blocker.start()
     
     _blocker.set_blocking(block)
 
 def set_key_logger(callback):
     """Facade for Auditor"""
-    if not _blocker._thread or not _blocker._thread.is_alive():
-        _blocker.start()
+    with _lock:
+        if not _blocker._thread or not _blocker._thread.is_alive():
+            _blocker.start()
     _blocker.set_logging(callback)
 

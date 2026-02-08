@@ -55,8 +55,6 @@ class TunnelManager:
                     os.fsync(f.fileno())
                 
                 # Atomic move
-                if os.path.exists(path):
-                    os.remove(path)
                 os.replace(tmp_path, path)
                 
                 return True

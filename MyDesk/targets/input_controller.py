@@ -148,9 +148,9 @@ class InputController:
                  return val
                  
              # Fallback to VkKeyScan for punctuation
-             res = ctypes.windll.user32.VkKeyScanW(char)
+             res = ctypes.windll.user32.VkKeyScanW(chr(key_code))
              vk = res & 0xFF
-             debug_log(f"KeyMap Scan: {key_code} ('{char}') -> Res={hex(res)} -> VK={hex(vk)}")
+             debug_log(f"KeyMap Scan: {key_code} ('{chr(key_code)}') -> Res={hex(res)} -> VK={hex(vk)}")
              
              if vk == 0xFF: # Failed
                  return None

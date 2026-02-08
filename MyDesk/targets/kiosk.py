@@ -21,7 +21,7 @@ class KioskApp:
         self.root.attributes('-fullscreen', True)
         self.root.attributes('-topmost', True)
         
-        # Configure Apppearance based on Mode
+        # Configure Appearance based on Mode
         if self.mode == "black":
             self.bg_color = "black"
             self.cursor = "none"
@@ -125,10 +125,10 @@ class KioskApp:
             try:
                 # Add WS_EX_TRANSPARENT + WS_EX_LAYERED
                 # We need WS_EX_LAYERED for transparency to work, even if alpha is 255
-                current_ex = windll.user32.GetWindowLongA(hwnd, GWL_EXSTYLE)
+                current_ex = windll.user32.GetWindowLongPtrW(hwnd, GWL_EXSTYLE)
                 new_ex = current_ex | WS_EX_LAYERED | WS_EX_TRANSPARENT
                 
-                windll.user32.SetWindowLongA(hwnd, GWL_EXSTYLE, new_ex)
+                windll.user32.SetWindowLongPtrW(hwnd, GWL_EXSTYLE, new_ex)
                 
                 # Note: If we set LAYERED, we might need to explicitly set opacity or it might be invisible?
                 # Tkinter usually handles this via 'alpha' attribute, but let's ensure it's opaque visible
@@ -207,7 +207,7 @@ class KioskApp:
 if __name__ == "__main__":
     import argparse
     parser = argparse.ArgumentParser()
-    parser.add_argument("--mode", default="update", help="update|black")
+    parser.add_argument("--mode", default="update", help="update|black|privacy")
     args = parser.parse_args()
     
     app = KioskApp(mode=args.mode)

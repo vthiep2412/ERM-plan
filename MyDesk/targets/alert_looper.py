@@ -73,12 +73,7 @@ def run_loop(check_active_func):
             last_sound = sound_name
             
             sound_path = get_system_sound_path(sound_name)
-            if sound_path:
-                play_sound_overlapped(sound_path)
-            else:
-                # Fallback if sound not found
-                play_sound_overlapped(r"C:\Windows\Media\Windows Background.wav")
-                
+            play_sound_overlapped(sound_path)                
         except Exception as e:
             print(f"[-] Alert Error: {e}")
         time.sleep(SPEED)

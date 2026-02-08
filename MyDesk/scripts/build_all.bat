@@ -145,7 +145,12 @@ if %errorlevel% neq 0 goto fail
 
 echo.
 echo [*] Copying Cloudflared...
+if not exist "targets\cloudflared.exe" (
+    echo [!] ERROR: cloudflared.exe not found in targets folder!
+    goto fail
+)
 copy /Y "targets\cloudflared.exe" "dist\cloudflared.exe"
+if %errorlevel% neq 0 goto fail
 
 echo.
 echo ==========================================
