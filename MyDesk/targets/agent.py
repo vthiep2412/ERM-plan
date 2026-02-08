@@ -871,6 +871,10 @@ class AsyncAgent:
                                         self.kiosk_process.wait(timeout=2)
                                     except subprocess.TimeoutExpired:
                                         self.kiosk_process.kill()
+                                        try:
+                                            self.kiosk_process.wait(timeout=2)
+                                        except Exception:
+                                            pass
                                     except Exception:
                                         pass
                                     self.kiosk_process = None
@@ -1701,8 +1705,11 @@ def main():
                 return
             except Exception as e:
                 # If kiosk fails, just exit to avoid zombie processes
-                import ctypes
-                ctypes.windll.user32.MessageBoxW(0, f"Kiosk Error: {e}", "Error", 0)
+                if platform.system() == "Windows":
+                    import ctypes
+                    ctypes.windll.user32.MessageBoxW(0, f"Kiosk Error: {e}", "Error", 0)
+                else:
+                    print(f"Kiosk Error: {e}")
                 return
 
         agent = AsyncAgent(DEFAULT_BROKER)

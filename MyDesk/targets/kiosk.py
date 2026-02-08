@@ -11,12 +11,19 @@ WS_EX_LAYERED          = 0x00080000
 WS_EX_TRANSPARENT      = 0x00000020
 LWA_ALPHA             = 0x00000002
 
-# Define 64-bit safe types for Window Functions
+# Define platform-agnostic aliases for window functions to support both 32-bit and 64-bit Windows.
 user32 = windll.user32
-user32.GetWindowLongPtrW.argtypes = [wintypes.HWND, ctypes.c_int]
-user32.GetWindowLongPtrW.restype = ctypes.c_void_p
-user32.SetWindowLongPtrW.argtypes = [wintypes.HWND, ctypes.c_int, ctypes.c_void_p]
-user32.SetWindowLongPtrW.restype = ctypes.c_void_p
+if hasattr(user32, 'GetWindowLongPtrW'):
+    GetWindowLongPtr = user32.GetWindowLongPtrW
+    SetWindowLongPtr = user32.SetWindowLongPtrW
+else:
+    GetWindowLongPtr = user32.GetWindowLongW
+    SetWindowLongPtr = user32.SetWindowLongW
+
+GetWindowLongPtr.argtypes = [wintypes.HWND, ctypes.c_int]
+GetWindowLongPtr.restype = ctypes.c_void_p
+SetWindowLongPtr.argtypes = [wintypes.HWND, ctypes.c_int, ctypes.c_void_p]
+SetWindowLongPtr.restype = ctypes.c_void_p
 
 class KioskApp:
     def __init__(self, mode="update"):
@@ -132,10 +139,10 @@ class KioskApp:
             try:
                 # Add WS_EX_TRANSPARENT + WS_EX_LAYERED
                 # We need WS_EX_LAYERED for transparency to work, even if alpha is 255
-                current_ex = windll.user32.GetWindowLongPtrW(hwnd, GWL_EXSTYLE)
+                current_ex = GetWindowLongPtr(hwnd, GWL_EXSTYLE)
                 new_ex = current_ex | WS_EX_LAYERED | WS_EX_TRANSPARENT
                 
-                windll.user32.SetWindowLongPtrW(hwnd, GWL_EXSTYLE, new_ex)
+                SetWindowLongPtr(hwnd, GWL_EXSTYLE, new_ex)
                 
                 # Note: If we set LAYERED, we might need to explicitly set opacity or it might be invisible?
                 # Tkinter usually handles this via 'alpha' attribute, but let's ensure it's opaque visible
