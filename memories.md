@@ -42,8 +42,3 @@ If you modify the architecture or add new modules:
 1. Update **Status Overview**.
 2. Add any new **Key Files**.
 3. Note any **Protocol Changes** in `Architecture Nuances`.
-
-## Known Issues
-- Mouse not working good! scroll, left click not work, and when reconnect only able to move the mouse cant do anything else!
-- getaddrinfo, isn't good, it make crash!
-- kiosk mode doesn't work

@@ -10,6 +10,7 @@ import platform
 import base64
 import threading
 import argparse
+import time
 
 # FIX: Windows specific event loop policy to prevent "Task was destroyed but it is pending" errors
 # and improve stability with subprocesses/pipes.
@@ -162,6 +163,40 @@ class AsyncAgent:
         self.MAX_BUFFER_SIZE = 5000
         self.reconnect_delay = 1.0 # Start with 1s
         self.target_fps = 30 # Default FPS
+
+        # Registry Heartbeat
+        self.registry_url = os.environ.get("REGISTRY_URL", "http://127.0.0.1:5000") # TODO: Config
+        self.registry_pwd = os.environ.get("REGISTRY_PASSWORD", "secret") # TODO: Config
+        self.heartbeat_thread = threading.Thread(target=self._heartbeat_loop, daemon=True)
+        self.heartbeat_thread.start()
+
+    def _heartbeat_loop(self):
+        """Sends heartbeat to Registry every 60s"""
+        while True:
+            try:
+                if self.direct_url: # Only report if we have a tunnel URL
+                   payload = {
+                       "id": self.my_id,
+                       "username": os.getlogin(),
+                       "url": self.direct_url,
+                       "password": self.registry_pwd
+                   }
+                   # Use requests or urllib (stdlib)
+                   req = urllib.request.Request(
+                       f"{self.registry_url}/update",
+                       data=json.dumps(payload).encode('utf-8'),
+                       headers={'Content-Type': 'application/json'}
+                   )
+                   with urllib.request.urlopen(req, timeout=10) as response:
+                       pass
+                       # print(f"[+] Heartbeat sent: {response.status}")
+                else:
+                    pass
+                    # print("[-] Heartbeat skipped: No Direct URL")
+            except Exception as e:
+                print(f"[-] Heartbeat Failed: {e}")
+            
+            time.sleep(60)
 
 
     def _create_background_task(self, coro):
@@ -1417,6 +1452,9 @@ class AsyncAgent:
             method=method,
             format=fmt
         )
+        # Explicitly log active method for user feedback
+        active_method = "DXCam" if getattr(self.capturer, 'dxcam_active', False) else "MSS"
+        print(f"[+] Settings Applied: Using {active_method} (Format: {fmt})")
 
     async def stream_screen(self, target_ws=None):
         print("[*] Screen Streaming Task Started")
@@ -1678,7 +1716,35 @@ class AsyncAgent:
         finally:
             self.loop.close()
 
+def disable_quickedit():
+    """Disable Windows Console QuickEdit and Insert Mode to prevent hanging."""
+    if platform.system() == "Windows":
+        try:
+            import ctypes
+            kernel32 = ctypes.windll.kernel32
+            
+            # std input handle
+            STD_INPUT_HANDLE = -10
+            hInput = kernel32.GetStdHandle(STD_INPUT_HANDLE)
+            
+            # current mode
+            mode = ctypes.c_ulong()
+            if not kernel32.GetConsoleMode(hInput, ctypes.byref(mode)):
+                return
+
+            # remove ENABLE_QUICK_EDIT_MODE (0x40) and ENABLE_INSERT_MODE (0x20)
+            # 0x0040 | 0x0020 = 0x0060
+            new_mode = mode.value & ~0x0060
+            
+            # set new mode
+            kernel32.SetConsoleMode(hInput, new_mode)
+            print("[+] Console QuickEdit Disabled")
+        except Exception as e:
+            print(f"[-] Failed to disable QuickEdit: {e}")
+
 def main():
+    disable_quickedit()
+    
     # CRASH LOGGER: Wrap main execution
     try:
         parser = argparse.ArgumentParser(description="MyDesk Agent")

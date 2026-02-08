@@ -4,13 +4,6 @@
         {
             "mode": "direct",
             "alias": "e",
-            "url": "wss://portfolio-continuity-eco-again.trycloudflare.com",
-            "id": "",
-            "last_seen": "2026-02-07 14:19"
-        },
-        {
-            "mode": "direct",
-            "alias": "e",
             "url": "wss://nextel-newspaper-bathrooms-johnny.trycloudflare.com",
             "id": "",
             "last_seen": "2026-02-07 15:17"
@@ -70,6 +63,14 @@
             "url": "wss://retrieval-sailing-season-medicare.trycloudflare.com",
             "id": "",
             "last_seen": "2026-02-08 09:44"
+        },
+        {
+            "mode": "direct",
+            "alias": "e",
+            "url": "wss://ours-kinda-pairs-palace.trycloudflare.com",
+            "id": "",
+            "last_seen": "2026-02-08 12:04"
         }
-    ]
+    ],
+    "registry_password": "admin123"
 }

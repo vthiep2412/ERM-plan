@@ -2,15 +2,17 @@ import sys
 import os
 import json
 import datetime
+import requests
 from PyQt6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, 
                              QPushButton, QLineEdit, QLabel, QMessageBox, QComboBox, QFrame, 
-                             QListWidget, QListWidgetItem, QAbstractItemView)
-from PyQt6.QtGui import QColor
-from PyQt6.QtCore import Qt
+                             QListWidget, QListWidgetItem, QAbstractItemView, QHBoxLayout, QGridLayout, QScrollArea)
+from PyQt6.QtGui import QColor, QIcon
+from PyQt6.QtCore import Qt, QTimer, pyqtSignal
 
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
 DEFAULT_BROKER = "ws://localhost:8765"
+DEFAULT_REGISTRY_URL = "http://127.0.0.1:5000"
 CONFIG_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "viewer_config.json")
 
 def normalize_color(color):
@@ -42,6 +44,77 @@ class ModernButton(QPushButton):
             }}
         """)
 
+class AgentCard(QFrame):
+    clicked = pyqtSignal(dict) # Emits agent data
+
+    def __init__(self, agent):
+        super().__init__()
+        self.agent = agent
+        self.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.setObjectName("AgentCard")
+        
+        is_active = agent.get('active', False)
+        status_color = "#22c55e" if is_active else "#666666"
+        border_color = "#22c55e" if is_active else "#333333"
+        bg_color = "#1A1A1A"
+        
+        self.setStyleSheet(f"""
+            QFrame#AgentCard {{
+                background-color: {bg_color};
+                border: 1px solid {border_color};
+                border-radius: 8px;
+            }}
+            QFrame#AgentCard:hover {{
+                background-color: #252525;
+                border: 1px solid {status_color};
+            }}
+            QLabel {{ border: none; background: transparent; }}
+        """)
+        
+        layout = QVBoxLayout(self)
+        layout.setSpacing(5)
+        
+        # Header: Icon + Status
+        header = QHBoxLayout()
+        icon = QLabel("🖥️")
+        icon.setStyleSheet("font-size: 24px;")
+        header.addWidget(icon)
+        header.addStretch()
+        
+        status_badge = QLabel("ONLINE" if is_active else "OFFLINE")
+        status_badge.setStyleSheet(f"""
+            color: white;
+            background-color: {status_color};
+            border-radius: 4px;
+            padding: 2px 6px;
+            font-size: 10px;
+            font-weight: bold;
+        """)
+        header.addWidget(status_badge)
+        layout.addLayout(header)
+        
+        # Username
+        lbl_user = QLabel(agent.get('username', 'Unknown'))
+        lbl_user.setStyleSheet("color: white; font-size: 16px; font-weight: bold;")
+        layout.addWidget(lbl_user)
+        
+        # ID / IP
+        lbl_id = QLabel(f"ID: {agent.get('id', '???')}")
+        lbl_id.setStyleSheet("color: #888; font-size: 11px;")
+        layout.addWidget(lbl_id)
+        
+        if is_active:
+             lbl_last = QLabel("Ready to connect")
+             lbl_last.setStyleSheet("color: #22c55e; font-size: 11px;")
+        else:
+             lbl_last = QLabel(f"Last seen: {agent.get('last_updated', 'Has not active clearly')}")
+             lbl_last.setStyleSheet("color: #666; font-size: 11px;")
+        layout.addWidget(lbl_last)
+
+    def mousePressEvent(self, event):
+        if event.button() == Qt.MouseButton.LeftButton:
+            self.clicked.emit(self.agent)
+
 class ClientManager(QMainWindow):
     MODE_BROKER = "broker"
     MODE_DIRECT = "direct"
@@ -49,10 +122,16 @@ class ClientManager(QMainWindow):
     def __init__(self):
         super().__init__()
         self.setWindowTitle("MyDesk - Connection Manager")
-        self.resize(500, 750)
+        self.resize(900, 700) # Wider for grid
         
         self.config = self.load_config()
         self.setup_ui()
+        
+        # Load registry password if saved
+        if "registry_password" in self.config:
+            self.pwd_input.setText(self.config["registry_password"])
+            # Auto-fetch if pwd is there
+            QTimer.singleShot(500, self.refresh_registry_list)
         
     def load_config(self):
         if os.path.exists(CONFIG_FILE):
@@ -61,7 +140,7 @@ class ClientManager(QMainWindow):
                     return json.load(f)
             except Exception as e:
                 print(f"[!] Failed to load config, using defaults: {e}")
-        return {"broker_url": DEFAULT_BROKER, "history": []}
+        return {"broker_url": DEFAULT_BROKER}
 
     def save_config(self):
         try:
@@ -71,23 +150,24 @@ class ClientManager(QMainWindow):
             print(f"[-] Failed to save config: {e}")
             import traceback
             traceback.print_exc()
-            QMessageBox.warning(self, "Config Error", f"Failed to save settings to {CONFIG_FILE}\n{e}")
 
     def setup_ui(self):
         # Dark Palette
         self.setStyleSheet("""
-            QMainWindow { background-color: #1E1E1E; }
+            QMainWindow { background-color: #000000; }
             QLabel { color: #CCCCCC; font-size: 14px; }
             QLineEdit, QComboBox, QListWidget { 
-                background-color: #2D2D30; 
+                background-color: #111111; 
                 color: white; 
-                border: 1px solid #3E3E42; 
+                border: 1px solid #333333; 
                 padding: 8px; 
-                border-radius: 4px;
+                border-radius: 6px;
             }
-            QFrame { border: none; }
-            QListWidget::item { padding: 10px; }
-            QListWidget::item:selected { background-color: #007ACC; }
+            QLineEdit:focus { border: 1px solid #0070f3; }
+            QScrollArea { border: none; background: transparent; }
+            QScrollBar:horizontal, QScrollBar:vertical { border: none; background: #000; margin: 0; }
+            QScrollBar::handle:horizontal, QScrollBar::handle:vertical { background: #333; min-width: 20px; border-radius: 5px; }
+            QScrollBar::add-line, QScrollBar::sub-line { border: none; background: none; }
         """)
 
         cw = QWidget()
@@ -97,196 +177,157 @@ class ClientManager(QMainWindow):
         main_layout.setContentsMargins(30, 30, 30, 30)
         
         # Header
-        header = QLabel("MyDesk")
-        header.setStyleSheet("font-size: 32px; font-weight: bold; color: #007ACC;")
-        header.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        main_layout.addWidget(header)
+        header_layout = QHBoxLayout()
+        logo = QLabel("MyDesk Viewer")
+        logo.setStyleSheet("font-size: 24px; font-weight: bold; color: white;")
+        header_layout.addWidget(logo)
+        header_layout.addStretch()
         
-        # Connection Box
-        box = QFrame()
-        box.setStyleSheet("background-color: #252526; border-radius: 10px;")
-        box_layout = QVBoxLayout(box)
-        box_layout.setSpacing(15)
-        box_layout.setContentsMargins(20, 20, 20, 20)
+        # Registry Password Input
+        self.pwd_input = QLineEdit()
+        self.pwd_input.setPlaceholderText("Registry Master Password")
+        self.pwd_input.setEchoMode(QLineEdit.EchoMode.Password)
+        self.pwd_input.setFixedWidth(200)
+        self.pwd_input.textChanged.connect(self.save_registry_pwd)
+        header_layout.addWidget(self.pwd_input)
         
-        # Mode Selection
-        box_layout.addWidget(QLabel("Connection Mode"))
-        self.mode_combo = QComboBox()
-        # self.mode_combo.addItem("Broker (Render/Local)", self.MODE_BROKER) # Removed
-        self.mode_combo.addItem("Direct Connection", self.MODE_DIRECT)
-        self.mode_combo.currentIndexChanged.connect(lambda: self.on_mode_change(self.mode_combo.currentData()))
-        box_layout.addWidget(self.mode_combo)
+        main_layout.addLayout(header_layout)
         
-        # Alias (Name)
-        box_layout.addWidget(QLabel("Computer Name (Alias)"))
-        self.alias_input = QLineEdit()
-        self.alias_input.setPlaceholderText("e.g. My Laptop")
-        box_layout.addWidget(self.alias_input)
-
-        # URL Input
-        self.lbl_url = QLabel("Server URL")
-        box_layout.addWidget(self.lbl_url)
-        self.url_input = QLineEdit(self.config.get("broker_url", DEFAULT_BROKER))
-        self.url_input.setPlaceholderText("wss://...")
-        box_layout.addWidget(self.url_input)
+        # Controls Bar
+        controls = QHBoxLayout()
+        controls.addWidget(QLabel("Discovered Agents"))
+        controls.addStretch()
         
-        # ID Input
-        self.lbl_id = QLabel("Target Agent ID")
-        box_layout.addWidget(self.lbl_id)
-        self.id_input = QLineEdit()
-        self.id_input.setPlaceholderText("Enter Agent ID...")
-        box_layout.addWidget(self.id_input)
+        btn_refresh = ModernButton("Refresh List", "#111111")
+        btn_refresh.setStyleSheet("""
+            QPushButton { background-color: #111111; border: 1px solid #333; color: white; padding: 6px 15px; border-radius: 6px; }
+            QPushButton:hover { background-color: #222; }
+        """)
+        btn_refresh.clicked.connect(self.refresh_registry_list)
+        controls.addWidget(btn_refresh)
         
-        # Connect Button
-        self.btn_connect = ModernButton("Connect", "#28A745") # Green
-        self.btn_connect.clicked.connect(self.start_connection)
-        box_layout.addWidget(self.btn_connect)
+        main_layout.addLayout(controls)
         
-        main_layout.addWidget(box)
+        # Agent Grid Area
+        self.scroll = QScrollArea()
+        self.scroll.setWidgetResizable(True)
         
-        # History Section
-        main_layout.addWidget(QLabel("Recent Connections"))
-        self.history_list = QListWidget()
-        self.history_list.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
-        self.history_list.itemDoubleClicked.connect(self.load_history_item)
-        main_layout.addWidget(self.history_list)
+        self.grid_container = QWidget()
+        self.grid_container.setStyleSheet("background-color: transparent;")
+        self.grid_layout = QGridLayout(self.grid_container)
+        self.grid_layout.setSpacing(15)
+        self.grid_layout.setAlignment(Qt.AlignmentFlag.AlignTop)
         
-        self.refresh_history()
-        self.on_mode_change(self.mode_combo.currentData()) # Init state
+        self.scroll.setWidget(self.grid_container)
+        main_layout.addWidget(self.scroll)
         
-        # Footer
-        footer = QLabel("v3.2.0 | Secure Remote Access")
-        footer.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        footer.setStyleSheet("color: #666666; font-size: 12px;")
+        # Footer / Manual Connect
+        footer = QFrame()
+        footer.setStyleSheet("background-color: #111; border-radius: 8px; border: 1px solid #222;")
+        footer_layout = QHBoxLayout(footer)
+        footer_layout.setContentsMargins(15, 10, 15, 10)
+        
+        footer_layout.addWidget(QLabel("Direct Connect:"))
+        
+        self.manual_url_input = QLineEdit()
+        self.manual_url_input.setPlaceholderText("wss://...")
+        footer_layout.addWidget(self.manual_url_input)
+        
+        btn_manual = ModernButton("Connect", "#0070f3")
+        btn_manual.clicked.connect(self.manual_connect)
+        footer_layout.addWidget(btn_manual)
+        
         main_layout.addWidget(footer)
-
-    def on_mode_change(self, mode_key):
-        is_broker = (mode_key == self.MODE_BROKER)
-        # Broker: Hide URL, Show ID
-        # Direct: Show URL, Hide ID
         
-        self.lbl_url.setVisible(not is_broker)
-        self.url_input.setVisible(not is_broker)
-        
-        self.lbl_id.setVisible(is_broker)
-        self.id_input.setVisible(is_broker)
+        # Status Bar
+        self.status_bar = QLabel("Ready")
+        self.status_bar.setStyleSheet("color: #666; font-size: 12px;")
+        main_layout.addWidget(self.status_bar)
 
-    def refresh_history(self):
-        self.history_list.clear()
-        for item in reversed(self.config.get("history", [])):
-            if isinstance(item, dict):
-                # Safe access with defaults
-                alias = item.get('alias', 'Unknown')
-                mode_key = item.get('mode', self.MODE_BROKER)
-                item_id = str(item.get('id') or '')
-                target_url = item.get('url', '')
-                
-                # Check for legacy "Broker" strings or new "broker" key
-                is_broker = (mode_key == self.MODE_BROKER) or (isinstance(mode_key, str) and "Broker" in mode_key)
-
-                if is_broker:
-                    label = f"[{alias}] ID: {item_id}"
-                else:
-                    label = f"[{alias}] Direct: {target_url}"
-                
-                list_item = QListWidgetItem(label)
-                list_item.setData(Qt.ItemDataRole.UserRole, item)
-                self.history_list.addItem(list_item)
-
-    def load_history_item(self, item):
-        data = item.data(Qt.ItemDataRole.UserRole)
-        if data and isinstance(data, dict):
-            mode_key = data.get('mode', self.MODE_BROKER)
-            
-            # Legacy conversion
-            if isinstance(mode_key, str) and "Broker" in mode_key and mode_key != self.MODE_BROKER:
-                mode_key = self.MODE_BROKER
-            elif isinstance(mode_key, str) and "Direct" in mode_key and mode_key != self.MODE_DIRECT:
-                mode_key = self.MODE_DIRECT
-
-            # Find data
-            index = self.mode_combo.findData(mode_key)            
-            if index >= 0:
-                self.mode_combo.setCurrentIndex(index)
-            else:
-                self.mode_combo.setCurrentIndex(0) # Default
-            
-            self.alias_input.setText(data.get('alias', ''))
-            self.id_input.setText(str(data.get('id') or ''))
-            self.url_input.setText(data.get('url', self.config.get("broker_url", DEFAULT_BROKER)))
-
-    def start_connection(self):
-        url = self.url_input.text().strip()
-        agent_id = self.id_input.text().strip()
-        alias = self.alias_input.text().strip() or "Unnamed"
-        mode_key = self.mode_combo.currentData()
-        
-        is_broker = (mode_key == self.MODE_BROKER)
-
-        # Default URL for Broker if hidden
-        if is_broker and not url:
-            url = self.config.get("broker_url", DEFAULT_BROKER)
-        
-        if not url:
-            QMessageBox.warning(self, "Error", "Please enter a Server URL.")
-            return
-
-        # Validate URL scheme
-        if not (url.startswith("ws://") or url.startswith("wss://")):
-            QMessageBox.warning(self, "Error", "URL must start with ws:// or wss://")
-            return
-
-        # Broker Validation
-        if is_broker and not agent_id:
-            QMessageBox.warning(self, "Error", "Please enter an Agent ID for Broker Mode.")
-            return
-
-        # Determine connection type
-        from viewer.session import SessionWindow # Lazy Load
-        
-        if not is_broker:
-            # Direct Mode
-            print(f"[*] Starting Direct Connection to {url}")
-            # Ensure ID is empty in history for direct mode
-            self.update_history(mode_key, alias, url, "") 
-            self.session = SessionWindow(url, target_id=None)
-        else:
-            # Broker Mode
-            print(f"[*] Starting Broker Connection to {url} (Target: {agent_id})")
-            self.update_history(mode_key, alias, url, agent_id)
-            self.session = SessionWindow(url, target_id=agent_id)
-            
-        self.session.show()
-        # self.hide()
-
-    def update_history(self, mode, alias, url, target_id):
-        history = self.config.get("history", [])
-        
-        # Deduplicate history: Remove entry with same URL + ID to move it to top.
-        # This way reconnecting to the same target updates its position and timestamp.
-        history = [h for h in history if not (h.get('url') == url and (h.get('id') or "") == (target_id or ""))]
-        
-        new_entry = {
-            "mode": mode,
-            "alias": alias,
-            "url": url,
-            "id": target_id,
-            "last_seen": datetime.datetime.now().strftime("%Y-%m-%d %H:%M")
-        }
-        
-        history.append(new_entry)
-        
-        # Limit to 10
-        if len(history) > 10:
-            history.pop(0)
-            
-        self.config["history"] = history
-        self.refresh_history()
+    def save_registry_pwd(self, text):
+        self.config["registry_password"] = text
         self.save_config()
+
+    def refresh_registry_list(self):
+        pwd = self.pwd_input.text()
+        registry_url = self.config.get("registry_url", DEFAULT_REGISTRY_URL)
+        
+        self.status_bar.setText("Fetching registry...")
+        
+        # Clear Grid
+        while self.grid_layout.count():
+            item = self.grid_layout.takeAt(0)
+            widget = item.widget()
+            if widget:
+                widget.deleteLater()
+        
+        try:
+            resp = requests.post(f"{registry_url}/discover", json={"password": pwd}, timeout=5)
+            if resp.status_code == 200:
+                agents = resp.json()
+                self.populate_grid(agents)
+                self.status_bar.setText(f"Found {len(agents)} agents")
+            elif resp.status_code == 403:
+                self.status_bar.setText("Access Denied: Invalid Password")
+                QMessageBox.warning(self, "Auth Error", "Invalid Registry Password")
+            else:
+                self.status_bar.setText(f"Error: {resp.status_code}")
+        except Exception as e:
+            self.status_bar.setText(f"Connection Error: {e}")
+            print(f"[-] Registry Error: {e}")
+
+    def populate_grid(self, agents):
+        # Sort by active status
+        agents.sort(key=lambda x: x.get('active', False), reverse=True)
+        
+        columns = 3
+        for i, agent in enumerate(agents):
+            row = i // columns
+            col = i % columns
+            
+            card = AgentCard(agent)
+            card.clicked.connect(self.connect_to_agent)
+            self.grid_layout.addWidget(card, row, col)
+
+    def connect_to_agent(self, agent):
+        url = agent.get('url')
+        if not url:
+            QMessageBox.warning(self, "Error", "Agent has no URL")
+            return
+        self.launch_session(url)
+
+    def manual_connect(self):
+        url = self.manual_url_input.text().strip()
+        if not url: return
+        self.launch_session(url)
+
+    def launch_session(self, url):
+        # Auto-convert https -> wss, http -> ws
+        if url.startswith("https://"):
+            url = url.replace("https://", "wss://", 1)
+        elif url.startswith("http://"):
+            url = url.replace("http://", "ws://", 1)
+            
+        # Strip trailing slash if present (e.g. wss://.../)
+        url = url.rstrip("/")
+
+        # Validate URL scheme (wss or ws)
+        if not (url.startswith("ws://") or url.startswith("wss://")):
+            QMessageBox.warning(self, "Error", "Invalid URL protocol. Use wss:// or https://")
+            return
+
+        # Show status
+        self.status_bar.setText(f"Connecting to {url}...")
+        QApplication.processEvents() # Update UI before blocking import/connect
+
+        from viewer.session import SessionWindow # Lazy Load
+        print(f"[*] Connecting to {url}")
+        self.session = SessionWindow(url, target_id=None)
+        self.session.show()
 
 if __name__ == "__main__":
     app = QApplication(sys.argv)
     window = ClientManager()
     window.show()
     sys.exit(app.exec())
-# alr 
+

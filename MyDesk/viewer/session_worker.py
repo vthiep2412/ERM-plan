@@ -11,12 +11,9 @@ sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 from core import protocol
 from core.network import send_msg, recv_msg
 
-# WebRTC support (optional)
-try:
-    from viewer.webrtc_client import WebRTCClient, AIORTC_AVAILABLE
-except ImportError:
-    AIORTC_AVAILABLE = False
-    WebRTCClient = None
+# WebRTC support (optional) - Lazy loaded
+AIORTC_AVAILABLE = True # Will be checked on import
+
 
 class AsyncSessionWorker(QObject):
     frame_received = pyqtSignal(bytes)
@@ -184,6 +181,17 @@ class AsyncSessionWorker(QObject):
     async def _start_webrtc(self, ws):
         """Initialize WebRTC connection with Agent"""
         try:
+            # Lazy import to avoid startup lag
+            try:
+                from viewer.webrtc_client import WebRTCClient, AIORTC_AVAILABLE
+                if not AIORTC_AVAILABLE:
+                    raise ImportError("aiortc not installed")
+            except ImportError:
+                print("[-] WebRTC not available (aiortc not installed)")
+                self.use_webrtc = False
+                await send_msg(ws, json.dumps({"op": "start_stream"}))
+                return
+
             print("[*] Starting WebRTC connection...")
             
             # Create WebRTC client with message sender

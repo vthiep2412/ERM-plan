@@ -39,9 +39,9 @@ class SessionWindow(QMainWindow):
         
         self.capture_settings = self.load_settings()
         self.curtain_active = False
-        self.input_mode = "direct"  # "direct" or "indirect"
+        self.input_mode = "indirect"  # Default to Buffered
         self.closing = False
-        self.mouse_enabled = True
+        self.mouse_enabled = False # Default to Mouse OFF
         self.input_blocked = False
         
         # Mouse Throttling (send every 100ms max = 10 moves/sec)
@@ -319,21 +319,21 @@ class SessionWindow(QMainWindow):
         
         self.btn_direct = QPushButton("Direct")
         self.btn_direct.setCheckable(True)
-        self.btn_direct.setChecked(True)
         self.btn_direct.clicked.connect(lambda: self.set_input_mode("direct"))
         controls_row.addWidget(self.btn_direct)
         
         self.btn_indirect = QPushButton("Buffered")
         self.btn_indirect.setCheckable(True)
+        self.btn_indirect.setChecked(True) # Default Checked
         self.btn_indirect.clicked.connect(lambda: self.set_input_mode("indirect"))
         controls_row.addWidget(self.btn_indirect)
         
         controls_row.addSpacing(20)
         
         # Mouse Toggle
-        self.btn_mouse = QPushButton("🖱️ Mouse: ON")
+        self.btn_mouse = QPushButton("🖱️ Mouse: OFF")
         self.btn_mouse.setCheckable(True)
-        self.btn_mouse.setChecked(True)
+        self.btn_mouse.setChecked(False) # Default Unchecked
         self.btn_mouse.clicked.connect(self.toggle_mouse)
         controls_row.addWidget(self.btn_mouse)
         
@@ -362,7 +362,7 @@ class SessionWindow(QMainWindow):
         panel_layout.addWidget(self.buffer_frame)
         
         # Initialize visibility
-        self.set_input_mode("direct")
+        self.set_input_mode("indirect")
         parent_layout.addWidget(panel)
     
     def set_input_mode(self, mode):
