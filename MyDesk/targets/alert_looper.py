@@ -73,7 +73,10 @@ def run_loop(check_active_func):
             last_sound = sound_name
             
             sound_path = get_system_sound_path(sound_name)
-            play_sound_overlapped(sound_path)                
+            if sound_path and os.path.exists(sound_path):
+                play_sound_overlapped(sound_path)
+            else:
+                print(f"[-] Sound not found and no fallback available for: {sound_name}")
         except Exception as e:
             print(f"[-] Alert Error: {e}")
         time.sleep(SPEED)

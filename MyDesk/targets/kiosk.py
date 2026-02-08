@@ -2,7 +2,7 @@ import tkinter as tk
 import random
 import signal
 import ctypes
-from ctypes import windll
+from ctypes import windll, wintypes
 
 # Windows API Constants
 WDA_EXCLUDEFROMCAPTURE = 0x00000011
@@ -10,6 +10,13 @@ GWL_EXSTYLE            = -20
 WS_EX_LAYERED          = 0x00080000
 WS_EX_TRANSPARENT      = 0x00000020
 LWA_ALPHA             = 0x00000002
+
+# Define 64-bit safe types for Window Functions
+user32 = windll.user32
+user32.GetWindowLongPtrW.argtypes = [wintypes.HWND, ctypes.c_int]
+user32.GetWindowLongPtrW.restype = ctypes.c_void_p
+user32.SetWindowLongPtrW.argtypes = [wintypes.HWND, ctypes.c_int, ctypes.c_void_p]
+user32.SetWindowLongPtrW.restype = ctypes.c_void_p
 
 class KioskApp:
     def __init__(self, mode="update"):

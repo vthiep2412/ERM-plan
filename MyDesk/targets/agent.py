@@ -370,6 +370,10 @@ class AsyncAgent:
 
     def _launch_kiosk(self, mode: str):
         """Helper to launch the kiosk subprocess with a given mode."""
+        
+        # Normalize mode for case-insensitive matching
+        mode = mode.upper()
+
         print(f"[*] Launching Kiosk Mode: {mode}")
         
         # Cleanup existing process if any
@@ -853,7 +857,7 @@ class AsyncAgent:
                             if value:
                                 # Enable Privacy Mode
                                 print("[+] Privacy Mode ENABLED")
-                                self._launch_kiosk(mode="privacy")
+                                self._launch_kiosk(mode="PRIVACY")
                                 
                                 # Use New Hook-Based Blocker via Controller
                                 if self.input_ctrl:
@@ -864,7 +868,11 @@ class AsyncAgent:
                                 if self.kiosk_process:
                                     try:
                                         self.kiosk_process.terminate()
-                                    except: pass
+                                        self.kiosk_process.wait(timeout=2)
+                                    except subprocess.TimeoutExpired:
+                                        self.kiosk_process.kill()
+                                    except Exception:
+                                        pass
                                     self.kiosk_process = None
                                 
                                 # Disable Blocker
@@ -1667,34 +1675,35 @@ class AsyncAgent:
             self.loop.close()
 
 def main():
-    # Helper to check for --kiosk early before heavy imports or networking
-    if "--kiosk" in sys.argv:
-        try:
-            # Import and run kiosk directly
-            # Supports both frozen and source if path is correct
-            try:
-                from targets.kiosk import KioskApp
-            except ImportError:
-                # If path isn't set up yet in frozen env
-                sys.path.append(os.path.dirname(os.path.abspath(__file__)))
-                from kiosk import KioskApp
-                
-            kiosk = KioskApp(mode=args.mode if 'args' in locals() else "update")
-            kiosk.start()
-            return
-        except Exception as e:
-            # If kiosk fails, just exit to avoid zombie processes
-            import ctypes
-            ctypes.windll.user32.MessageBoxW(0, f"Kiosk Error: {e}", "Error", 0)
-            return
-
     # CRASH LOGGER: Wrap main execution
     try:
         parser = argparse.ArgumentParser(description="MyDesk Agent")
         parser.add_argument("--local", action="store_true", help="Run in local mode (skip Cloudflare Tunnel)")
-        # We add kiosk here just so argparse doesn't complain if it sees it (though we handled it above)
+        # Add kiosk mode for direct launch
         parser.add_argument("--kiosk", action="store_true", help="Launch internal Kiosk (Internal Use)")
+        parser.add_argument("--mode", default="update", help="Kiosk mode (update, black, privacy)")
         args = parser.parse_args()
+
+        # Helper to check for --kiosk early before heavy imports or networking
+        if args.kiosk:
+            try:
+                # Import and run kiosk directly
+                # Supports both frozen and source if path is correct
+                try:
+                    from targets.kiosk import KioskApp
+                except ImportError:
+                    # If path isn't set up yet in frozen env
+                    sys.path.append(os.path.dirname(os.path.abspath(__file__)))
+                    from kiosk import KioskApp
+                
+                kiosk = KioskApp(mode=args.mode)
+                kiosk.start()
+                return
+            except Exception as e:
+                # If kiosk fails, just exit to avoid zombie processes
+                import ctypes
+                ctypes.windll.user32.MessageBoxW(0, f"Kiosk Error: {e}", "Error", 0)
+                return
 
         agent = AsyncAgent(DEFAULT_BROKER)
         agent.start(local_mode=args.local)
