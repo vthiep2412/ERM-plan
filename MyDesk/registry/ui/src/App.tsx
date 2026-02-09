@@ -1,32 +1,40 @@
 import { useState } from 'react';
 import { Login } from './components/Login';
 import { Dashboard } from './components/Dashboard';
-import { Toaster } from 'sonner';
+import { Toaster, toast } from 'sonner';
+
 
 function App() {
   const [password, setPassword] = useState<string | null>(() => {
-    return localStorage.getItem('registry_pwd');
+    // Check session storage instead of local storage for better security
+    return sessionStorage.getItem('registry_token');
   });
 
   const handleLogin = (pwd: string) => {
     setPassword(pwd);
-    localStorage.setItem('registry_pwd', pwd);
+    sessionStorage.setItem('registry_token', pwd);
+    toast.success("Logged in!");
   };
 
   const handleLogout = () => {
     setPassword(null);
-    localStorage.removeItem('registry_pwd');
+    sessionStorage.removeItem('registry_token');
+    toast.info("Logged out");
   };
 
   return (
-    <>
-      <Toaster position="top-right" theme="dark" richColors />
-      {!password ? (
-        <Login onLogin={handleLogin} />
-      ) : (
-        <Dashboard password={password} onLogout={handleLogout} />
-      )}
-    </>
+    <div className="min-h-screen bg-black text-white selection:bg-white/20 flex flex-col">
+      <div className="flex-1 flex flex-col">
+        <main className="flex-1 flex flex-col">
+          {password === null ? (
+            <Login onLogin={handleLogin} />
+          ) : (
+            <Dashboard password={password} onLogout={handleLogout} />
+          )}
+        </main>
+      </div>
+      <Toaster position="bottom-right" theme="dark" />
+    </div>
   );
 }
 

@@ -5,7 +5,7 @@ import os
 URL = "http://127.0.0.1:5000/discover"
 PWD = "HOLYFUCKJAMESLORDGOTHACK132"
 
-print(f"[*] Testing Auth with password: {PWD}")
+print(f"[*] Testing Auth with password: {'*' * len(PWD)}")
 start = time.time()
 try:
     res = requests.post(URL, json={"password": PWD}, timeout=5)

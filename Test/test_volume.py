@@ -1,11 +1,16 @@
 import subprocess
 import time
+import platform
 
 def set_mute(mute_status: bool):
     """
     Mutes or Unmutes the system audio using C# reflection via PowerShell.
     True = Mute, False = Unmute.
     """
+    if platform.system() != "Windows":
+        print("[-] Skipping Volume Test: Non-Windows OS")
+        return False
+
     # Convert Python boolean to PowerShell boolean syntax
     ps_bool = "$true" if mute_status else "$false"
     
@@ -46,14 +51,19 @@ public class MMDeviceEnumeratorComObject {{ }}
 public class Audio {{
     public static void SetMute(bool mute) {{
         var enumerator = new MMDeviceEnumeratorComObject() as IMMDeviceEnumerator;
+        if (enumerator == null) return;
+
         IMMDevice dev = null;
         enumerator.GetDefaultAudioEndpoint(0, 1, out dev);
+        if (dev == null) return;
         
         var iid = new Guid("5CDF2C82-841E-4546-9722-0CF74078229A");
         object volObj;
         dev.Activate(ref iid, 23, IntPtr.Zero, out volObj);
         
         var vol = volObj as IAudioEndpointVolume;
+        if (vol == null) return;
+
         vol.SetMute(mute, Guid.Empty);
     }}
 }}
@@ -64,17 +74,23 @@ public class Audio {{
     # Execute the PowerShell command silently
     try:
         cmd = ["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", ps_script]
-        # Use simple subprocess run
-        result = subprocess.run(cmd, capture_output=True, text=True)
+        # Use simple subprocess run with timeout
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=10)
         
         if result.returncode != 0:
             print(f"[-] Error Muting/Unmuting: {result.stderr.strip()}")
+            return False
         else:
             state = "MUTED" if mute_status else "UNMUTED"
             print(f"[+] System Audio is now: {state}")
+            return True
             
+    except subprocess.TimeoutExpired:
+        print("[-] Error: PowerShell command timed out")
+        return False
     except Exception as e:
         print(f"[-] Execution Failed: {e}")
+        return False
 
 # --- TEST SECTION ---
 if __name__ == "__main__":

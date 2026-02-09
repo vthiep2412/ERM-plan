@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { Lock } from 'lucide-react';
+
 import { toast } from 'sonner';
 import { api } from '../lib/api';
 
@@ -36,7 +37,7 @@ export function Login({ onLogin }: LoginProps) {
     };
 
     return (
-        <div className="flex min-h-screen items-center justify-center bg-black text-white">
+        <div className="flex flex-1 items-center justify-center p-4">
             <div className="w-full max-w-sm p-8 space-y-6 bg-zinc-900 border border-zinc-800 rounded-xl shadow-2xl">
                 <div className="flex flex-col items-center space-y-2">
                     <div className="p-3 bg-zinc-800 rounded-full">

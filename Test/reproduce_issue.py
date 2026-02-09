@@ -69,6 +69,9 @@ def install_hook():
     kernel32 = ctypes.windll.kernel32
     h_mod = kernel32.GetModuleHandleW(None)
     hhk = user32.SetWindowsHookExW(WH_KEYBOARD_LL, proc, h_mod, 0)
+    if not hhk:
+        print(f"Failed to install hook: {ctypes.GetLastError()}")
+        return
     print(f"Hook installed: {hhk}")
     
     msg = wintypes.MSG()

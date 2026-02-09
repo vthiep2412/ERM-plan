@@ -1,12 +1,13 @@
 import av
 print("Encoders:")
-try:
-    for name in sorted(av.codecs_available):
-        codec = av.Codec(name, 'w')
+for name in sorted(av.codecs_available):
+    try:
+        # Filter first to avoid unnecessary instantiation
         if 'h264' in name or 'nvenc' in name:
+            codec = av.Codec(name, 'w')
             print(f" - {name}: {codec.long_name}")
-except Exception as e:
-    print(f"Error listing codecs: {e}")
+    except Exception as e:
+        print(f"Error checking {name}: {e}")
 
 try:
     c = av.Codec('h264_nvenc', 'w')

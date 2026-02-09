@@ -1,0 +1,11 @@
+{
+  "name": "mydesk-registry",
+  "version": "1.0.0",
+  "scripts": {
+    "install": "cd ui && npm install",
+    "build": "cd ui && npm run build"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}

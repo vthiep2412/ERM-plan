@@ -3,11 +3,12 @@ import os
 import json
 import datetime
 import requests
+import keyring
 from PyQt6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, 
-                             QPushButton, QLineEdit, QLabel, QMessageBox, QComboBox, QFrame, 
-                             QListWidget, QListWidgetItem, QAbstractItemView, QHBoxLayout, QGridLayout, QScrollArea)
-from PyQt6.QtGui import QColor, QIcon
-from PyQt6.QtCore import Qt, QTimer, pyqtSignal
+                             QPushButton, QLineEdit, QLabel, QMessageBox, 
+                             QFrame, QHBoxLayout, QGridLayout, QScrollArea)
+from PyQt6.QtGui import QColor
+from PyQt6.QtCore import Qt, QTimer, pyqtSignal, QThread
 
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
@@ -21,6 +22,16 @@ def normalize_color(color):
     if qc.isValid():
         return qc.name()  # Returns #RRGGBB
     return "#007ACC"  # Fallback
+
+def parse_time(iso_str):
+    """Parse ISO timestamp to local readable format."""
+    try:
+        if not iso_str: return "Never"
+        dt = datetime.datetime.fromisoformat(iso_str)
+        local = dt.astimezone()
+        return local.strftime("%Y-%m-%d %H:%M:%S")
+    except Exception:
+        return str(iso_str)
 
 class ModernButton(QPushButton):
     def __init__(self, text, color="#007ACC"):
@@ -107,13 +118,43 @@ class AgentCard(QFrame):
              lbl_last = QLabel("Ready to connect")
              lbl_last.setStyleSheet("color: #22c55e; font-size: 11px;")
         else:
-             lbl_last = QLabel(f"Last seen: {agent.get('last_updated', 'Has not active clearly')}")
+             raw_time = agent.get('last_updated')
+             friendly_time = parse_time(raw_time)
+             lbl_last = QLabel(f"Last seen: {friendly_time}")
              lbl_last.setStyleSheet("color: #666; font-size: 11px;")
         layout.addWidget(lbl_last)
 
     def mousePressEvent(self, event):
         if event.button() == Qt.MouseButton.LeftButton:
             self.clicked.emit(self.agent)
+
+class RegistryWorker(QThread):
+    finished = pyqtSignal(list)
+    error = pyqtSignal(str)
+
+    def __init__(self, url, pwd):
+        super().__init__()
+        self.url = url
+        self.pwd = pwd
+
+    def run(self):
+        try:
+            # Construct endpoint
+            if self.url.endswith("/api"):
+                 target_endpoint = f"{self.url}/discover"
+            else:
+                 target_endpoint = f"{self.url}/api/discover"
+
+            resp = requests.post(target_endpoint, json={"password": self.pwd}, timeout=5)
+            
+            if resp.status_code == 200:
+                self.finished.emit(resp.json())
+            elif resp.status_code == 403:
+                self.error.emit("Access Denied: Invalid Password")
+            else:
+                self.error.emit(f"Error: {resp.status_code}")
+        except Exception as e:
+            self.error.emit(str(e))
 
 class ClientManager(QMainWindow):
     MODE_BROKER = "broker"
@@ -127,11 +168,18 @@ class ClientManager(QMainWindow):
         self.config = self.load_config()
         self.setup_ui()
         
-        # Load registry password if saved
-        if "registry_password" in self.config:
-            self.pwd_input.setText(self.config["registry_password"])
-            # Auto-fetch if pwd is there
-            QTimer.singleShot(500, self.refresh_registry_list)
+        # Load registry password from Keyring
+        try:
+            saved_pwd = keyring.get_password("MyDesk", "registry")
+            if saved_pwd:
+                self.pwd_input.setText(saved_pwd)
+                # Auto-fetch if pwd is there
+                QTimer.singleShot(500, self.refresh_registry_list)
+        except Exception as e:
+            print(f"[-] Keyring Load Error: {e}")
+            
+        self.session = None
+        self.worker = None
         
     def load_config(self):
         if os.path.exists(CONFIG_FILE):
@@ -188,7 +236,7 @@ class ClientManager(QMainWindow):
         self.pwd_input.setPlaceholderText("Registry Master Password")
         self.pwd_input.setEchoMode(QLineEdit.EchoMode.Password)
         self.pwd_input.setFixedWidth(200)
-        self.pwd_input.textChanged.connect(self.save_registry_pwd)
+        self.pwd_input.editingFinished.connect(self.save_registry_pwd)
         header_layout.addWidget(self.pwd_input)
         
         main_layout.addLayout(header_layout)
@@ -242,11 +290,19 @@ class ClientManager(QMainWindow):
         # Status Bar
         self.status_bar = QLabel("Ready")
         self.status_bar.setStyleSheet("color: #666; font-size: 12px;")
+        self.status_bar.setWordWrap(True) # Fix: Prevent long errors from expanding window width
         main_layout.addWidget(self.status_bar)
 
-    def save_registry_pwd(self, text):
-        self.config["registry_password"] = text
-        self.save_config()
+    def save_registry_pwd(self):
+        text = self.pwd_input.text()
+        try:
+            keyring.set_password("MyDesk", "registry", text)
+            # Remove from config if it exists there to clean up
+            if "registry_password" in self.config:
+                del self.config["registry_password"]
+                self.save_config()
+        except Exception as e:
+            print(f"[-] Keyring Save Error: {e}")
 
     def refresh_registry_list(self):
         pwd = self.pwd_input.text()
@@ -254,27 +310,30 @@ class ClientManager(QMainWindow):
         
         self.status_bar.setText("Fetching registry...")
         
+        # Disable button? (Optional, but good UX)
+        
+        self.worker = RegistryWorker(registry_url, pwd)
+        self.worker.finished.connect(self.on_refresh_success)
+        self.worker.error.connect(self.on_refresh_error)
+        self.worker.start()
+
+    def on_refresh_success(self, agents):
         # Clear Grid
         while self.grid_layout.count():
             item = self.grid_layout.takeAt(0)
             widget = item.widget()
             if widget:
                 widget.deleteLater()
-        
-        try:
-            resp = requests.post(f"{registry_url}/discover", json={"password": pwd}, timeout=5)
-            if resp.status_code == 200:
-                agents = resp.json()
-                self.populate_grid(agents)
-                self.status_bar.setText(f"Found {len(agents)} agents")
-            elif resp.status_code == 403:
-                self.status_bar.setText("Access Denied: Invalid Password")
-                QMessageBox.warning(self, "Auth Error", "Invalid Registry Password")
-            else:
-                self.status_bar.setText(f"Error: {resp.status_code}")
-        except Exception as e:
-            self.status_bar.setText(f"Connection Error: {e}")
-            print(f"[-] Registry Error: {e}")
+                
+        self.populate_grid(agents)
+        self.status_bar.setText(f"Found {len(agents)} agents")
+
+    def on_refresh_error(self, err_msg):
+        self.status_bar.setText(err_msg)
+        if "Access Denied" in err_msg:
+             QMessageBox.warning(self, "Auth Error", err_msg)
+        else:
+             print(f"[-] Registry Error: {err_msg}")
 
     def populate_grid(self, agents):
         # Sort by active status
@@ -322,6 +381,13 @@ class ClientManager(QMainWindow):
 
         from viewer.session import SessionWindow # Lazy Load
         print(f"[*] Connecting to {url}")
+        
+        # Cleanup old session if exists
+        if self.session:
+            try:
+                self.session.close()
+            except: pass
+            
         self.session = SessionWindow(url, target_id=None)
         self.session.show()
 

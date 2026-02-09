@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback } from 'react';
+import React, { useEffect, useState, useCallback } from 'react';
 import { api, type Agent } from '../lib/api';
 import { toast } from 'sonner';
 import { Trash2, Globe, Monitor, Clock, RefreshCw } from 'lucide-react';
@@ -45,8 +45,12 @@ export function Dashboard({ password, onLogout }: DashboardProps) {
     }, [fetchAgents]);
 
     const handleCopy = (url: string) => {
-        navigator.clipboard.writeText(url);
-        toast.success("URL copied to clipboard");
+        navigator.clipboard.writeText(url)
+            .then(() => toast.success("Copied to clipboard!"))
+            .catch((err) => {
+                console.error("Failed to copy:", err);
+                toast.error("Failed to copy to clipboard");
+            });
     };
 
     const handleDelete = async (id: string, e: React.MouseEvent) => {

