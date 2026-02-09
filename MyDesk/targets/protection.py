@@ -1,9 +1,6 @@
-import sys
-import os
 import win32api
 import win32security
 import win32con
-import ntsecuritycon
 from ctypes import windll, c_bool
 
 def is_safe_mode():
@@ -67,6 +64,6 @@ def protect_process():
             None, None, dacl, None
         )
         return True
-    except Exception as e:
+    except Exception:
         # print(f"Protection Failed: {e}")
         return False

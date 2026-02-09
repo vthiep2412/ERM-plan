@@ -6,7 +6,7 @@ import { Toaster, toast } from 'sonner';
 
 function App() {
   const [password, setPassword] = useState<string | null>(() => {
-    // Check session storage instead of local storage for better security
+    // Use sessionStorage so credential is cleared when the browser tab closes
     return sessionStorage.getItem('registry_token');
   });
 

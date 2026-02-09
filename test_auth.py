@@ -1,6 +1,5 @@
 import requests
 import time
-import os
 
 URL = "http://127.0.0.1:5000/discover"
 PWD = "HOLYFUCKJAMESLORDGOTHACK132"

@@ -34,13 +34,6 @@ try:
 except ImportError:
     pass
 
-# Try JXL plugin
-try:
-    import pillow_jxl  # noqa: F401
-    HAS_JXL = True
-except ImportError:
-    HAS_JXL = False
-
 # Check for GPU encoding (NVENC via OpenCV)
 HAS_GPU = False
 if cv2:
@@ -51,21 +44,7 @@ if cv2:
     except Exception:
         pass
 
-# Try ZSTD for faster compression
-HAS_ZSTD = False
-try:
-    import zstd  # noqa: F401
-    HAS_ZSTD = True
-except ImportError:
-    try:
-        import zstandard as zstd  # noqa: F401
-        HAS_ZSTD = True
-    except ImportError:
-        pass
-
 TILE_SIZE = 32  # 32x32 pixel tiles
-
-import ctypes
 from ctypes import windll, Structure, c_long, byref
 
 class POINT(Structure):
@@ -86,7 +65,7 @@ class DeltaScreenCapturer:
             print(f"[!] Invalid format '{format}'. Allowed: {ALLOWED_FORMATS}. Defaulting to WEBP.")
             format_upper = 'WEBP'
         
-        if format_upper == 'JXL' and not HAS_JXL:
+        if format_upper == 'JXL':
             print("[!] JXL requested but pillow_jxl not available. Defaulting to WEBP.")
             format_upper = 'WEBP'
             
@@ -193,9 +172,6 @@ class DeltaScreenCapturer:
     def get_frame_bytes(self):
         """Get delta-encoded frame (or full keyframe)"""
         self.frame_count += 1
-        
-        # Force keyframe periodically (reserved for future delta frame implementation)
-        _force_keyframe = (self.frame_count % self.keyframe_interval == 0)
         
         # Capture raw frame
         raw_frame = self._capture_raw()

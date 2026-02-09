@@ -4,7 +4,6 @@ Handles mouse and keyboard simulation using native SendInput for Hook compatibil
 """
 import struct
 import ctypes
-import time
 
 try:
     from targets.input_blocker import block_input as hook_block_input

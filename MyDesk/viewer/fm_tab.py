@@ -289,7 +289,7 @@ class FMTab(QWidget):
             files: List of dicts with {name, is_dir, size, modified}
             path: Optional path that was listed
         """
-        if path:
+        if path is not None:
             self.current_path = path
             self.path_input.setText(path)
         

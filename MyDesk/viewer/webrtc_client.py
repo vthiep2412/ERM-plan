@@ -7,7 +7,6 @@ import json
 
 try:
     from aiortc import RTCPeerConnection, RTCSessionDescription, RTCConfiguration, RTCIceServer
-    from aiortc.contrib.media import MediaRecorder
     AIORTC_AVAILABLE = True
 except ImportError:
     AIORTC_AVAILABLE = False
@@ -107,7 +106,6 @@ class WebRTCClient(QObject if PYQT_AVAILABLE else object):
         sdp = self.pc.localDescription.sdp
         sdp_lines = sdp.splitlines()
         new_lines = []
-        video_found = False
         for line in sdp_lines:
             new_lines.append(line)
             if line.startswith("m=video"):

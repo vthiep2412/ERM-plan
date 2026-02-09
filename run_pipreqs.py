@@ -1,5 +1,4 @@
 import sys
-import os
 
 try:
     from pipreqs import pipreqs

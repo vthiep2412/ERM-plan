@@ -1,13 +1,13 @@
 import os
 import sys
 import time
-import ctypes
 import uiautomation as auto
+import ctypes
 
 def is_admin():
     try:
         return ctypes.windll.shell32.IsUserAnAdmin()
-    except:
+    except OSError:
         return False
 
 def disable_tamper_protection():
@@ -64,8 +64,8 @@ def disable_tamper_protection():
             # Wait for content
             link = win.HyperlinkControl(Name="Manage settings", searchDepth=12)
             if not link.Exists(maxSearchSeconds=15):
-                 link = win.Control(Name="Manage settings", searchDepth=15)
-                 link.Exists(maxSearchSeconds=5) 
+                link = win.Control(Name="Manage settings", searchDepth=15)
+                link.Exists(maxSearchSeconds=5)
             print("Page loaded!")
         else:
             print("Window did not appear in time. Proceeding anyway...")
@@ -108,5 +108,7 @@ def disable_tamper_protection():
     print("[-] Done.")
 
 if __name__ == "__main__":
-    print("hi")
+    if not is_admin():
+        print("[!] This script requires administrator privileges. Please run as admin.")
+        sys.exit(1)
     disable_tamper_protection()

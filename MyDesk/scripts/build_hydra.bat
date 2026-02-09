@@ -17,6 +17,10 @@ if %errorlevel% neq 0 (
 :: 1. Cleanup
 if exist dist (
     rmdir /s /q dist
+    if %errorlevel% neq 0 (
+        echo [!] Failed to remove dist folder! Build Aborted.
+        exit /b 1
+    )
     mkdir dist
     echo [*] Cleaned up dist folder.
 ) else (
@@ -27,7 +31,6 @@ if %errorlevel% neq 0 (
     echo [!] Failed to clean up dist folder! Build Aborted.
     exit /b 1
 )
-
 :: 2. Build AGENT (Copied from build_all.bat)
 echo [*] Building 1/4: MyDeskAgent.exe...
 python -m PyInstaller --noconsole --onefile --noupx --name MyDeskAgent ^
@@ -123,6 +126,10 @@ echo.
 echo [*] Building 3/4: MyDeskServiceB.exe (Cloning A)...
 copy /Y "dist\MyDeskServiceA.exe" "dist\MyDeskServiceB.exe" > nul
 
+if %errorlevel% neq 0 (
+    echo [!] Service B Clone Failed!
+    exit /b %errorlevel%
+)
 :: 5. Build Setup Bundle
 echo.
 echo [*] Building 4/4: MyDeskSetup.exe (Installer)...

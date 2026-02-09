@@ -91,7 +91,7 @@ class SettingsDialog(QDialog):
         format_group = QGroupBox("Compression Format")
         format_layout = QVBoxLayout(format_group)
         self.format_combo = QComboBox()
-        self.format_combo.addItems(["JPEG", "WebP", "JXL"])
+        self.format_combo.addItems(["JPEG", "WebP"])
         self.format_combo.setCurrentText(self.settings.get("format", "JPEG"))
         format_layout.addWidget(self.format_combo)
         layout.addWidget(format_group)

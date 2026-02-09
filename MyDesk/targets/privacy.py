@@ -26,7 +26,6 @@ class PrivacyCurtain:
             
             # Exclusion Logic
             try:
-                import ctypes
                 from ctypes import windll
                 hwnd = self.root.winfo_id()
                 # Try setting on root and parent

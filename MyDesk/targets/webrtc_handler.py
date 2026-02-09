@@ -3,12 +3,10 @@ WebRTC Handler for MyDesk Agent
 Manages WebRTC peer connections and signaling.
 Uses H.264 for optimal performance.
 """
-import asyncio
-import json
 import logging
 
 try:
-    from aiortc import RTCPeerConnection, RTCSessionDescription, RTCConfiguration, RTCIceServer
+    from aiortc import RTCPeerConnection, RTCSessionDescription, RTCConfiguration
     from aiortc.contrib.media import MediaRelay
     from aiortc.codecs import h264
     AIORTC_AVAILABLE = True

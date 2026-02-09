@@ -100,7 +100,7 @@ class SessionWindow(QMainWindow):
         # Clipboard Tab
         self.clipboard_tab = ClipboardTab()
         self.clipboard_tab.get_clipboard_signal.connect(self.request_clipboard)
-        self.clipboard_tab.set_clipboard_signal.connect(self.set_clipboard)
+
         self.tabs.addTab(self.clipboard_tab, "Clipboard")
         
         # Device Settings Tab
@@ -186,11 +186,7 @@ class SessionWindow(QMainWindow):
                 bytes([protocol.OP_CLIP_DELETE]) + json.dumps({"index": idx}).encode('utf-8')
             )
         )
-        self.clipboard_tab.set_consent_signal.connect(
-            lambda enabled: self.worker.send_msg(
-                bytes([protocol.OP_CLIP_CONSENT]) + json.dumps({"consent": enabled}).encode('utf-8')
-            )
-        )
+
         
         # Connection Dialog (blocks until connected)
         self.conn_dialog = ConnectionDialog(target_id or target_url, self)
@@ -650,10 +646,6 @@ class SessionWindow(QMainWindow):
     def request_clipboard(self):
         """Request clipboard content from agent."""
         self.send_command(protocol.OP_CLIP_GET)
-    
-    def set_clipboard(self, text):
-        """Set clipboard on agent."""
-        self.send_command(protocol.OP_CLIP_SET, text.encode('utf-8'))
     
     # =========================================================================
     # Device Settings Tab Handlers

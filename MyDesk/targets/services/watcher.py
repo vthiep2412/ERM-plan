@@ -6,9 +6,8 @@ import win32serviceutil
 import win32service
 import win32event
 import servicemanager
-import socket
 import ctypes
-from ctypes import windll, byref, c_int, c_bool, c_ulong, c_void_p
+from ctypes import windll, byref, c_void_p
 
 # Add parent directory to path to import protection
 current_dir = os.path.dirname(os.path.abspath(__file__))
@@ -99,8 +98,7 @@ def start_agent_as_user():
         # Self-Healing: Check if Agent exists
         if not os.path.exists(AGENT_EXE):
             log(f"Agent missing at {AGENT_EXE}")
-            return 
-
+            return False
         # 1. Get Active Session ID (Robust Enumeration)
         # Defines for WTSEnumerateSessions
         class WTS_SESSION_INFO(ctypes.Structure):
@@ -246,7 +244,7 @@ def start_agent_as_user():
             log(f"CreateProcessAsUserW Failed. Error: {err}")
             return False
 
-    except Exception as e:
+    except Exception:
         return False
 
 class WatcherService(win32serviceutil.ServiceFramework):
@@ -335,15 +333,17 @@ if __name__ == '__main__':
         # FROZEN SERVICE HANDLER
         if len(sys.argv) == 1:
             try:
-                import servicemanager
                 servicemanager.Initialize()
                 servicemanager.PrepareToHostSingle(WatcherService)
                 
                 servicemanager.StartServiceCtrlDispatcher()
-            except Exception as e:
+            except Exception:
                 pass
         else:
-            win32serviceutil.HandleCommandLine(WatcherService)
+            try:
+                win32serviceutil.HandleCommandLine(WatcherService)
+            except Exception:
+                pass
             
-    except Exception as e:
+    except Exception:
         pass
