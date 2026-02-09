@@ -299,7 +299,7 @@ class ClipboardTab(QWidget):
             except Exception as e:
                 print(f"[-] Viewer Clipboard Set Error: {e}")
 
-        # Add to front of history (newest first)
+        # Add to end of history (displayed newest first via reversal)
         self.history.append(entry)
         self.rebuild_history_ui()
     

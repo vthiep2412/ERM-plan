@@ -7,15 +7,9 @@ import hashlib
 import numpy as np
 
 # Safe Imports
-dxcam = None
 mss = None
 Image = None
 cv2 = None
-
-try:
-    import dxcam
-except ImportError:
-    pass
 
 try:
     from PIL import Image
@@ -52,10 +46,9 @@ class POINT(Structure):
 
 # Allowed capture formats
 ALLOWED_FORMATS = {'JPEG', 'WEBP', 'PNG', 'JXL'}
-ALLOWED_METHODS = {'mss', 'dxcam'}
 
 class DeltaScreenCapturer:
-    def __init__(self, quality=50, scale=0.9, method="mss", format="WEBP"):
+    def __init__(self, quality=50, scale=0.9, format="WEBP"):
         self.quality = quality
         self.scale = scale
         
@@ -66,42 +59,15 @@ class DeltaScreenCapturer:
             format_upper = 'WEBP'
         
         if format_upper == 'JXL':
-            print("[!] JXL requested but pillow_jxl not available. Defaulting to WEBP.")
+            print("[!] JXL format is not currently supported. Defaulting to WEBP.")
             format_upper = 'WEBP'
-            
         self.format = format_upper
         
-        # Validate method
-        method_lower = method.lower()
-        if method_lower not in ALLOWED_METHODS:
-            print(f"[!] Invalid method '{method}'. Allowed: {ALLOWED_METHODS}. Defaulting to mss.")
-            method_lower = 'mss'
-        self.method = method_lower
-        
-        self.dxcam_instance = None
-        self.dxcam_active = False  # Separate flag for DXCam state
-        self._dxcam_fail_count = 0 
-        self.use_mss = True  # Default fallback
-        
-        # Method Selection
-        if self.method == "dxcam" and dxcam:
-            try:
-                # Initialize DXCam
-                print("[*] Initializing DXCam...")
-                self.dxcam_instance = dxcam.create(output_color="RGB")
-                self.dxcam_active = True
-                self.use_mss = False
-                print("[+] Capture: DXCam Active")
-            except Exception as e:
-                print(f"[-] DXCam Init Failed: {e}. Falling back to MSS.")
-                self.dxcam_active = False
-                self.use_mss = True
-        
-        if self.use_mss:
-            if mss:
-                print(f"[+] Capture: MSS Delta @ Q{quality}")
-            else:
-                print("[!] Capture: Pillow Fallback (MSS missing)")
+        # MSS capture
+        if mss:
+            print(f"[+] Capture: MSS @ Q{quality}")
+        else:
+            print("[!] Capture: Pillow Fallback (MSS missing)")
 
         # Delta state
         self.prev_frame = None
@@ -116,30 +82,6 @@ class DeltaScreenCapturer:
             print("[+] Encoding: GPU (NVENC)")
         else:
             print(f"[+] Encoding: CPU ({self.format})")
-    
-    def release(self):
-        """Explicitly release resources"""
-        if self.dxcam_instance is not None:
-            try:
-                # Stop capture loop first
-                if hasattr(self.dxcam_instance, 'stop'):
-                    self.dxcam_instance.stop()
-                 
-                # Explicit release if available
-                if hasattr(self.dxcam_instance, 'release'):
-                    self.dxcam_instance.release()  
-                 
-                # Note: Setting to None triggers comtypes __del__ which might log
-                # "access violation" warnings due to race conditions in comtypes cleanup.
-                # This is often benign in this context but noisy.
-            except Exception: 
-                pass
-            finally:
-                self.dxcam_instance = None
-
-    def __del__(self):
-        """Cleanup resources"""
-        self.release()
     
     def get_raw_frame(self):
         """
@@ -264,29 +206,8 @@ class DeltaScreenCapturer:
         """Capture raw frame as numpy array"""
         img = None
         
-        # 1. DXCam
-        if self.dxcam_instance:
-            try:
-                img = self.dxcam_instance.grab()
-                if img is not None:
-                    self._dxcam_fail_count = 0
-                    # DXCam usually captures primary monitor at (0,0)
-                    # TODO: If DXCam supports multi-monitor, get its offset
-                    self.monitor_left = 0
-                    self.monitor_top = 0
-            except Exception as e:
-                # Disable after failures
-                self._dxcam_fail_count += 1
-                if self._dxcam_fail_count > 5:
-                    print(f"[-] DXCam failed repeatedly ({e}). Disabling.")
-                    self.dxcam_instance = None
-                    self.dxcam_active = False
-                    self.use_mss = True
-                else:
-                    print(f"[-] DXCam Grab Error: {e}")
-
-        # 2. MSS
-        if img is None and self.use_mss and mss:
+        # MSS Capture
+        if mss:
             try:
                 with mss.mss() as sct:
                     # Check monitors

@@ -30,6 +30,7 @@ def protect_process():
     Modify the DACL of the current process to deny termination.
     """
     if is_safe_mode():
+        print("[-] Protection: Skipped (Safe Mode)")
         return False
 
     try:
@@ -44,17 +45,23 @@ def protect_process():
         )
         dacl = sd.GetSecurityDescriptorDacl()
         
+        # If no DACL, create one
+        if dacl is None:
+            dacl = win32security.ACL()
+        
         # Create 'Everyone' SID
-        everyone_sid = win32security.SID()
-        everyone_sid.Initialize(win32security.SECURITY_WORLD_SID_AUTHORITY, 1)
-        everyone_sid.SetSubAuthority(0, win32security.SECURITY_WORLD_RID)
+        everyone_sid = win32security.CreateWellKnownSid(win32security.WinWorldSid, None)
         
         # Add Deny ACE for Terminate & Suspend
         # PROCESS_TERMINATE = 0x0001
         # PROCESS_SUSPEND_RESUME = 0x0800
-        mask = win32con.PROCESS_TERMINATE | win32con.PROCESS_SUSPEND_RESUME | win32con.PROCESS_VM_OPERATION | win32con.PROCESS_VM_WRITE
+        # PROCESS_VM_OPERATION = 0x0008
+        # PROCESS_VM_WRITE = 0x0020
+        # WRITE_DAC = 0x40000 (prevents ACL modification)
+        # WRITE_OWNER = 0x80000 (prevents owner change)
+        mask = 0x0001 | 0x0800 | 0x0008 | 0x0020 | 0x40000 | 0x80000
         
-        dacl.AddAccessDeniedAce(dacl.GetAceCount(), mask, everyone_sid)
+        dacl.AddAccessDeniedAce(win32security.ACL_REVISION, mask, everyone_sid)
         
         # Set the new DACL
         win32security.SetSecurityInfo(
@@ -63,7 +70,8 @@ def protect_process():
             win32security.DACL_SECURITY_INFORMATION,
             None, None, dacl, None
         )
+        print("[+] Process Protection Applied (ACL Deny Terminate)")
         return True
-    except Exception:
-        # print(f"Protection Failed: {e}")
+    except Exception as e:
+        print(f"[-] Protection Failed: {e}")
         return False

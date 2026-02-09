@@ -41,16 +41,22 @@ def is_process_running(process_name):
     """Check if a process is running using tasklist."""
     try:
         # /NH = No Header
-        output = subprocess.check_output(f'tasklist /NH /FI "IMAGENAME eq {process_name}"', shell=True).decode()
+        # FIX: Use argument list to prevent command injection
+        command = ['tasklist', '/NH', '/FI', f'IMAGENAME eq {process_name}']
+        output = subprocess.check_output(command, stderr=subprocess.STDOUT).decode()
         return process_name.lower() in output.lower()
-    except:
+    except subprocess.CalledProcessError:
+        # This can happen if the process is not found, which is not an error here.
+        return False
+    except Exception:
         return False
 
 def start_service(service_name):
     """Start a Windows Service."""
     try:
-        subprocess.run(f"sc start {service_name}", shell=True, check=False)
-    except:
+        # FIX: Use argument list to prevent command injection
+        subprocess.run(["sc", "start", service_name], check=False, capture_output=True)
+    except (subprocess.SubprocessError, FileNotFoundError):
         pass
 
 def download_agent():

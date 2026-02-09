@@ -2,7 +2,7 @@ import sys
 import os
 
 # Add target dir to path
-sys.path.append(os.path.abspath("MyDesk/targets"))
+sys.path.append(os.path.abspath("../MyDesk/targets"))
 
 try:
     print("Importing input_controller...")

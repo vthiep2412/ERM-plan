@@ -14,7 +14,22 @@ if %errorlevel% neq 0 (
     exit /b 1
 )
 
-:: 1. Cleanup
+:: 1. Cleanup build artifacts
+echo [*] Cleaning build artifacts...
+if exist build (
+    rmdir /s /q build
+    if %errorlevel% neq 0 (
+        echo [!] Failed to remove build folder! Build Aborted.
+        exit /b 1
+    )
+    echo [*] Removed build folder.
+)
+
+:: Remove .spec files
+del /q *.spec 2>nul
+echo [*] Removed .spec files.
+
+:: Clean dist folder
 if exist dist (
     rmdir /s /q dist
     if %errorlevel% neq 0 (
@@ -53,6 +68,9 @@ python -m PyInstaller --noconsole --onefile --noupx --name MyDeskAgent ^
     --exclude-module uiautomation ^
     --exclude-module nodriver ^
     --exclude-module pynput ^
+    --exclude-module pillow_jxl ^
+    --exclude-module zstandard ^
+    --exclude-module dxcam ^
     --hidden-import=targets.input_controller ^
     --hidden-import=targets.privacy ^
     --hidden-import=targets.capture ^
@@ -89,8 +107,6 @@ python -m PyInstaller --noconsole --onefile --noupx --name MyDeskAgent ^
     --hidden-import=psutil ^
     --hidden-import=targets.tunnel_manager ^
     --hidden-import=targets.kiosk ^
-    --hidden-import=pillow_jxl ^
-    --hidden-import=zstandard ^
     --add-data "targets;targets" ^
     agent_loader.py
 

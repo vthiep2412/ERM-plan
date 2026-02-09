@@ -6,7 +6,7 @@ Uses H.264 for optimal performance.
 import logging
 
 try:
-    from aiortc import RTCPeerConnection, RTCSessionDescription, RTCConfiguration
+    from aiortc import RTCPeerConnection, RTCSessionDescription, RTCConfiguration, RTCIceServer
     from aiortc.contrib.media import MediaRelay
     from aiortc.codecs import h264
     AIORTC_AVAILABLE = True

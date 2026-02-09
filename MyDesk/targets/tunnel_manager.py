@@ -9,11 +9,12 @@ CLOUDFLARED_URL = "https://github.com/cloudflare/cloudflared/releases/latest/dow
 CLOUDFLARED_BIN = "cloudflared.exe"
 
 class TunnelManager:
-    def __init__(self, port):
+    def __init__(self, port, on_url_change=None):
         self.port = port
         self.process = None
         self.public_url = None
         self.running = False
+        self.on_url_change = on_url_change  # Callback when URL changes (for registry update)
         
     def _download_binary(self):
         # 1. Check current directory
@@ -111,6 +112,9 @@ class TunnelManager:
         t = threading.Thread(target=self._parse_output)
         t.daemon = True
         t.start()
+
+        # Start watchdog to monitor and restart if it dies
+        self.start_watchdog()
         
         # Wait for URL up to 45s
         for _ in range(45):
@@ -131,12 +135,71 @@ class TunnelManager:
             # Example: https://fitting-random-word.trycloudflare.com
             match = re.search(r'https://[a-zA-Z0-9-]+\.trycloudflare\.com', line)
             if match:
-                self.public_url = match.group(0)
-                print(f"[+] Tunnel URL Found: {self.public_url}")
+                new_url = match.group(0)
+                print(f"[+] Tunnel URL Found: {new_url}")
+                
+                # Only trigger callback if URL actually changed
+                if new_url != self.public_url:
+                    self.public_url = new_url
+                    
+                    # Notify agent to update registry
+                    if self.on_url_change:
+                        try:
+                            self.on_url_change(new_url)
+                        except Exception as e:
+                            print(f"[-] URL change callback error: {e}")
+
+    def _watchdog(self):
+        """Monitor cloudflared and restart if it dies."""
+        while self.running:
+            time.sleep(2)  # Faster response
+            
+            if self.process and self.process.poll() is not None:
+                # Process died
+                print("[!] Cloudflared tunnel died, restarting...")
+                self._restart_tunnel()
+    
+    def _restart_tunnel(self):
+        """Restart the tunnel (internal, no download check)."""
+        try:
+            # Use the path resolved by _download_binary
+            cmd = [self.cloudflared_path, "tunnel", "--url", f"http://localhost:{self.port}"]
+            
+            startupinfo = None
+            if os.name == 'nt':
+                startupinfo = subprocess.STARTUPINFO()
+                startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+                
+            self.process = subprocess.Popen(
+                cmd,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.PIPE,
+                stdin=subprocess.DEVNULL,
+                startupinfo=startupinfo,
+                text=True,
+                bufsize=1,
+                universal_newlines=True
+            )
+            
+            # Restart URL parser
+            t = threading.Thread(target=self._parse_output)
+            t.daemon = True
+            t.start()
+            
+            print("[+] Cloudflared tunnel restarted")
+        except Exception as e:
+            print(f"[-] Tunnel restart failed: {e}")
+
+    def start_watchdog(self):
+        """Start the watchdog thread (call after start())."""
+        wt = threading.Thread(target=self._watchdog)
+        wt.daemon = True
+        wt.start()
+        print("[+] Tunnel watchdog started")
                 
     def stop(self):
         self.running = False
         if self.process:
             self.process.terminate()
             self.process = None
-# alr 
+

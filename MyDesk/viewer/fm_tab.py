@@ -149,6 +149,13 @@ class FMTab(QWidget):
             self.list_signal.emit(path)
     
     def go_up(self):
+        # Resolve '.' or empty paths to real paths first if possible
+        if self.current_path == "." or not self.current_path:
+            try:
+                self.current_path = os.path.abspath(os.getcwd())
+            except:
+                self.current_path = "" # Fallback to drives
+        
         # Use ntpath for Windows remote paths
         remote_path = ntpath
         
@@ -164,11 +171,11 @@ class FMTab(QWidget):
         stripped = self.current_path.rstrip("\\/")
         parent = remote_path.dirname(stripped)
         
-        if parent:
+        if parent and parent != self.current_path:
             self.current_path = parent
             self.path_input.setText(parent)
             self.list_signal.emit(parent)
-        elif self.current_path and self.current_path != ".":
+        else:
              # Last resort, go to drive list
              self.current_path = ""
              self.path_input.setText("")

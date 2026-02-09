@@ -148,11 +148,16 @@ class RegistryWorker(QThread):
             resp = requests.post(target_endpoint, json={"password": self.pwd}, timeout=5)
             
             if resp.status_code == 200:
-                self.finished.emit(resp.json())
+                try:
+                    self.finished.emit(resp.json())
+                except json.JSONDecodeError as e:
+                    self.error.emit(f"Invalid JSON response from server: {e}")
             elif resp.status_code == 403:
                 self.error.emit("Access Denied: Invalid Password")
             else:
-                self.error.emit(f"Error: {resp.status_code}")
+                self.error.emit(f"Error: {resp.status_code} - {resp.text}")
+        except requests.exceptions.RequestException as e:
+            self.error.emit(f"Network Error: {e}")
         except Exception as e:
             self.error.emit(str(e))
 

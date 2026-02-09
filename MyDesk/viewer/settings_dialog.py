@@ -58,7 +58,7 @@ class SettingsDialog(QDialog):
         method_group = QGroupBox("Capture Method")
         method_layout = QVBoxLayout(method_group)
         self.method_combo = QComboBox()
-        self.method_combo.addItems(["MSS", "DXCam", "PIL"])
+        self.method_combo.addItems(["MSS"])
         self.method_combo.setCurrentText(self.settings.get("method", "MSS"))
         method_layout.addWidget(self.method_combo)
         layout.addWidget(method_group)

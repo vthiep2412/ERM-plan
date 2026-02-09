@@ -212,7 +212,6 @@ class SessionWindow(QMainWindow):
         
         # Auto-refresh managers
         self.request_process_list()
-        self.request_file_list(".")
 
         # Auto-run 'dir' with 1s delay
         QTimer.singleShot(1000, lambda: self.send_shell_command("ps", "dir"))

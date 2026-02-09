@@ -211,3 +211,4 @@ cloudflared.exe
 viewer_keylogs*.txt
 NEXT_AGENT_INSTRUCTIONS.md
 MyDesk/viewer/viewer_config.json
+MyDesk/targets/cloudflared.exe.tmp

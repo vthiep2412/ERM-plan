@@ -51,18 +51,18 @@ public class MMDeviceEnumeratorComObject {{ }}
 public class Audio {{
     public static void SetMute(bool mute) {{
         var enumerator = new MMDeviceEnumeratorComObject() as IMMDeviceEnumerator;
-        if (enumerator == null) return;
+        if (enumerator == null) throw new Exception("Failed to create MMDeviceEnumerator");
 
         IMMDevice dev = null;
         enumerator.GetDefaultAudioEndpoint(0, 1, out dev);
-        if (dev == null) return;
+        if (dev == null) throw new Exception("Failed to get default audio endpoint");
         
         var iid = new Guid("5CDF2C82-841E-4546-9722-0CF74078229A");
         object volObj;
         dev.Activate(ref iid, 23, IntPtr.Zero, out volObj);
         
         var vol = volObj as IAudioEndpointVolume;
-        if (vol == null) return;
+        if (vol == null) throw new Exception("Failed to activate IAudioEndpointVolume");
 
         vol.SetMute(mute, Guid.Empty);
     }}

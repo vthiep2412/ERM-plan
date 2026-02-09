@@ -92,7 +92,6 @@ OP_FM_MKDIR     = 0x7E  # Viewer -> Agent: {"path": "..."}
 # ============================================================================
 OP_CLIP_GET     = 0x80  # Viewer -> Agent: request clipboard
 OP_CLIP_DATA    = 0x81  # Agent -> Viewer: clipboard content
-OP_CLIP_SET     = 0x82  # Viewer -> Agent: set clipboard content
 OP_CLIP_HISTORY_REQ = 0x83  # Viewer -> Agent: request clipboard history
 OP_CLIP_HISTORY_DATA = 0x84  # Agent -> Viewer: JSON history list
 OP_CLIP_ENTRY   = 0x85  # Agent -> Viewer: new clipboard entry (real-time)
