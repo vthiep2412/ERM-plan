@@ -53,6 +53,14 @@ def get_agent():
     download_url = os.environ.get('AGENT_DOWNLOAD_URL') or hardcoded_agent
     return redirect(download_url, code=302)
 
+@app.route('/api/version', methods=['GET'])
+def get_version():
+    """Return the latest approved version string and download URL."""
+    return jsonify({
+        "version": os.environ.get('AGENT_LATEST_VERSION', '1.0.0'),
+        "url": "/api/get-agent"
+    })
+
 @app.route('/api/update', methods=['POST'])
 def update_machine():
     """Received from Agent: Updates the tunnel URL (Heartbeat)"""
@@ -73,6 +81,7 @@ def update_machine():
     db.collection('agents').document(doc_id).set({
         'username': data.get('username'),
         'url': data.get('url'),
+        'version': data.get('version', 'unknown'),
         'last_updated': firestore.SERVER_TIMESTAMP
     }, merge=True)
     

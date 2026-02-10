@@ -1,9 +1,12 @@
 import subprocess
 import os
 import time
-import requests
 import threading
 import re
+import shutil
+import tempfile
+import urllib.request
+import ssl
 
 CLOUDFLARED_URL = "https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-windows-amd64.exe"
 CLOUDFLARED_BIN = "cloudflared.exe"
@@ -15,19 +18,19 @@ class TunnelManager:
         self.public_url = None
         self.running = False
         self.on_url_change = on_url_change  # Callback when URL changes (for registry update)
+        self.start_time = 0
+        self.STUCK_TIMEOUT = 300  # 5 minutes
         
     def _download_binary(self):
+        """Ensures cloudflared.exe exists, downloading if necessary."""
         # 1. Check current directory
         if os.path.exists(CLOUDFLARED_BIN):
-            self.cloudflared_path = CLOUDFLARED_BIN
+            self.cloudflared_path = os.path.abspath(CLOUDFLARED_BIN)
             return True
             
         # 2. Check globally installed (PATH)
-        import shutil
-        import tempfile
         path_bin = shutil.which("cloudflared")
         if path_bin:
-            print(f"[*] Found cloudflared in PATH: {path_bin}")
             self.cloudflared_path = path_bin
             return True
             
@@ -35,49 +38,48 @@ class TunnelManager:
         temp_dir = tempfile.gettempdir()
         temp_bin = os.path.join(temp_dir, CLOUDFLARED_BIN)
         if os.path.exists(temp_bin):
-            print(f"[*] Found cloudflared in TEMP: {temp_bin}")
             self.cloudflared_path = temp_bin
             return True
         
         # 4. Try Download to CWD, then Fallback to TEMP
-        print("[*] Downloading cloudflared...")
+        print(f"[*] Binary Resurrection: cloudflared.exe is missing from {CLOUDFLARED_BIN}, PATH, and TEMP. Downloading...")
         
-        # Helper to download to a specific path
         def download_to(path):
             tmp_path = path + ".tmp"
             try:
                 print(f"[*] Attempting download to: {path}")
-                r = requests.get(CLOUDFLARED_URL, stream=True, timeout=15)
-                r.raise_for_status()
-                with open(tmp_path, 'wb') as f:
-                    for chunk in r.iter_content(chunk_size=8192):
-                        f.write(chunk)
-                    f.flush()
-                    os.fsync(f.fileno())
+                
+                # Using urllib with unverified SSL context for max reliability in restricted envs (VMs)
+                ctx = ssl._create_unverified_context()
+                with urllib.request.urlopen(CLOUDFLARED_URL, timeout=30, context=ctx) as response:
+                    with open(tmp_path, 'wb') as f:
+                        while True:
+                            chunk = response.read(8192)
+                            if not chunk:
+                                break
+                            f.write(chunk)
+                        f.flush()
+                        os.fsync(f.fileno())
                 
                 # Atomic move
-                os.replace(tmp_path, path)
-                
+                if os.path.exists(path):
+                    os.remove(path)
+                os.rename(tmp_path, path)
                 return True
             except Exception as e:
                 print(f"[-] Download to {path} failed: {e}")
                 if os.path.exists(tmp_path):
-                    try:
-                        os.remove(tmp_path)
-                    except:
-                        pass
+                    try: os.remove(tmp_path)
+                    except: pass
                 return False
 
         # Try CWD first
         if download_to(CLOUDFLARED_BIN):
-            print("[+] Downloaded to CWD")
-            self.cloudflared_path = CLOUDFLARED_BIN
+            self.cloudflared_path = os.path.abspath(CLOUDFLARED_BIN)
             return True
             
         # If CWD failed, Try TEMP
-        print("[!] CWD Write Failed. Trying Temp Folder...")
         if download_to(temp_bin):
-            print(f"[+] Downloaded to TEMP: {temp_bin}")
             self.cloudflared_path = temp_bin
             return True
             
@@ -88,6 +90,8 @@ class TunnelManager:
             return None
 
         # Use the path resolved by _download_binary
+        self.start_time = time.time()
+        self.public_url = None
         cmd = [self.cloudflared_path, "tunnel", "--url", f"http://localhost:{self.port}"]
         
         # Prevent console window popping up
@@ -96,16 +100,22 @@ class TunnelManager:
             startupinfo = subprocess.STARTUPINFO()
             startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
             
-        self.process = subprocess.Popen(
-            cmd,
-            stdout=subprocess.DEVNULL,  # Discard stdout to prevent buffer deadlock
-            stderr=subprocess.PIPE,     # We only need stderr for the URL
-            stdin=subprocess.DEVNULL,
-            startupinfo=startupinfo,
-            text=True,
-            bufsize=1,
-            universal_newlines=True
-        )
+        print(f"[*] Tunnel Subprocess: Executing {cmd}")
+        try:
+            self.process = subprocess.Popen(
+                cmd,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.PIPE,
+                stdin=subprocess.DEVNULL,
+                startupinfo=startupinfo,
+                text=True,
+                bufsize=1,
+                universal_newlines=True
+            )
+        except Exception as e:
+            print(f"[-] Tunnel Subprocess Error: Failed to launch: {e}")
+            return None
+            
         self.running = True
         
         # Start thread to parse output for URL
@@ -150,18 +160,51 @@ class TunnelManager:
                             print(f"[-] URL change callback error: {e}")
 
     def _watchdog(self):
-        """Monitor cloudflared and restart if it dies."""
+        """Immortal Watchdog: Monitor, Resurrect Binary, and Restart Tunnel."""
+        fail_count = 0
         while self.running:
-            time.sleep(2)  # Faster response
-            
-            if self.process and self.process.poll() is not None:
-                # Process died
-                print("[!] Cloudflared tunnel died, restarting...")
-                self._restart_tunnel()
+            try:
+                time.sleep(5)
+                
+                if (not self.process or self.process.poll() is not None) and self.running:
+                    # Tunnel is down!
+                    print(f"[!] Immortal Watchdog: Tunnel is down (Fail Count: {fail_count})")
+                    
+                    # 1. Binary Resurrection: Check if file was deleted
+                    if not os.path.exists(self.cloudflared_path):
+                        print("[!] Binary Resurrection: cloudflared.exe was deleted! Recovering...")
+                        if not self._download_binary():
+                            print("[-] Binary Resurrection: FAILED. Retrying in 30s...")
+                            time.sleep(30)
+                            continue
+
+                    # 2. Restart
+                    self._restart_tunnel()
+                    fail_count += 1
+                    
+                    # Exponential backoff for repeated failures (up to 5 mins)
+                    wait_time = min(300, 5 * (2 ** min(fail_count, 6)))
+                    if fail_count > 1:
+                        print(f"[*] Backing off for {wait_time}s...")
+                        time.sleep(wait_time)
+                else:
+                    # Reset failure count if it stayed up (has a URL)
+                    if self.public_url:
+                        fail_count = 0
+                    
+                    # 3. Stuck Detection: Process is alive but no URL after 5 mins
+                    if not self.public_url and (time.time() - self.start_time) > self.STUCK_TIMEOUT:
+                        print(f"[!] Immortal Watchdog: Tunnel is STUCK (No URL for {self.STUCK_TIMEOUT}s). Force restarting...")
+                        self._restart_tunnel()
+            except Exception as e:
+                print(f"[-] Watchdog Exception: {e}")
+                time.sleep(10)
     
     def _restart_tunnel(self):
         """Restart the tunnel (internal, no download check)."""
         try:
+            self.start_time = time.time()
+            self.public_url = None
             # Use the path resolved by _download_binary
             cmd = [self.cloudflared_path, "tunnel", "--url", f"http://localhost:{self.port}"]
             
@@ -197,6 +240,15 @@ class TunnelManager:
         wt.start()
         print("[+] Tunnel watchdog started")
                 
+    def restart(self):
+        """Public method to manually trigger a restart of the tunnel."""
+        # Force kill current process if alive
+        if self.process:
+            try:
+                self.process.terminate()
+            except: pass
+        self._restart_tunnel()
+
     def stop(self):
         self.running = False
         if self.process:

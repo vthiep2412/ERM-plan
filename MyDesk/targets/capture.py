@@ -64,8 +64,10 @@ class DeltaScreenCapturer:
         self.format = format_upper
         
         # MSS capture
+        self.sct = None
         if mss:
-            print(f"[+] Capture: MSS @ Q{quality}")
+            self.sct = mss.mss()
+            print(f"[+] Capture: MSS @ Q{quality} (Persistent)")
         else:
             print("[!] Capture: Pillow Fallback (MSS missing)")
 
@@ -82,6 +84,14 @@ class DeltaScreenCapturer:
             print("[+] Encoding: GPU (NVENC)")
         else:
             print(f"[+] Encoding: CPU ({self.format})")
+    
+    def __del__(self):
+        """Ensure MSS resources are released"""
+        if self.sct:
+            try:
+                self.sct.close()
+            except:
+                pass
     
     def get_raw_frame(self):
         """
@@ -207,27 +217,31 @@ class DeltaScreenCapturer:
         img = None
         
         # MSS Capture
-        if mss:
+        if self.sct:
             try:
-                with mss.mss() as sct:
-                    # Check monitors
-                    monitor_idx = 1
-                    if len(sct.monitors) <= 1:
-                        monitor_idx = 0 # Monitor 0 matches "all monitors" or single
-                    
-                    mon = sct.monitors[monitor_idx]
-                    self.monitor_left = mon['left']
-                    self.monitor_top = mon['top']
-                    
-                    sct_img = sct.grab(mon)
-                    # MSS captures BGRA (4 channels): Blue, Green, Red, Alpha
-                    img_bgra = np.frombuffer(sct_img.bgra, dtype=np.uint8)
-                    # Reshape to (height, width, 4) for BGRA channels
-                    img_bgra = img_bgra.reshape((sct_img.height, sct_img.width, 4))
-                    # Convert BGRA to RGB: indices [2,1,0] select R,G,B, dropping Alpha
-                    img = img_bgra[:, :, [2, 1, 0]]
+                # Check monitors
+                monitor_idx = 1
+                if len(self.sct.monitors) <= 1:
+                    monitor_idx = 0 # Monitor 0 matches "all monitors" or single
+                
+                mon = self.sct.monitors[monitor_idx]
+                self.monitor_left = mon['left']
+                self.monitor_top = mon['top']
+                
+                sct_img = self.sct.grab(mon)
+                # MSS captures BGRA (4 channels): Blue, Green, Red, Alpha
+                img_bgra = np.frombuffer(sct_img.bgra, dtype=np.uint8)
+                # Reshape to (height, width, 4) for BGRA channels
+                img_bgra = img_bgra.reshape((sct_img.height, sct_img.width, 4))
+                # Convert BGRA to RGB: indices [2,1,0] select R,G,B, dropping Alpha
+                img = img_bgra[:, :, [2, 1, 0]]
             except Exception as e:
                 print(f"[-] MSS Error: {e}")
+                # Optional: Try to recreate sct if it permanently failed
+                try:
+                    self.sct = mss.mss()
+                except:
+                    pass
         
         # 3. Fallback to PIL
         if img is None:
@@ -349,4 +363,3 @@ class DeltaScreenCapturer:
 
 # Backwards compatible - use Delta capturer as default
 ScreenCapturer = DeltaScreenCapturer
-# alr 

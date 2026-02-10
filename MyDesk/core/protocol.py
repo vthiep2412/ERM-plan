@@ -52,8 +52,8 @@ SETTING_QUALITY     = 3
 SETTING_AUDIO       = 4
 
 # Privacy Curtain
-OP_CURTAIN_ON  = 0x68  # Payload: "BLACK" or "FAKE_UPDATE" or "FAKE_BSOD"
-OP_CURTAIN_OFF = 0x69
+# OP_CURTAIN_ON  = 0x68  # Payload: "BLACK" or "FAKE_UPDATE" or "FAKE_BSOD"
+# OP_CURTAIN_OFF = 0x69
 
 # Buffered Input
 OP_KEY_BUFFER  = 0x6A  # Payload: buffered keystrokes

