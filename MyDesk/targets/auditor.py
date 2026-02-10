@@ -1,9 +1,10 @@
 from .input_blocker import set_key_logger
 
+
 class KeyAuditor:
     def __init__(self, callback_func):
         """
-        callback_func: Function to call when a key is pressed. 
+        callback_func: Function to call when a key is pressed.
         Signature: callback(keystring)
         """
         self.callback = callback_func

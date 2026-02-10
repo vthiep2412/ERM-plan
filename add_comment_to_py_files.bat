@@ -58,4 +58,4 @@ for %%f in (!FILES!) do (
 
 echo All specified Python files have been modified.
 endlocal
-pause
+@REM pause

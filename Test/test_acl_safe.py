@@ -16,28 +16,31 @@ if not is_admin:
 
 try:
     from protection import protect_process
+
     print("========================================")
     print("   ACL PROTECTION SAFETY TESTER")
     print("========================================")
     print(f"[*] Current PID: {os.getpid()}")
-    
+
     if protect_process():
         print("[+] SUCCESS: ACL Protection Applied.")
         print("[!] TRY TO KILL ME NOW!")
         print("    1. Open Task Manager -> End Task")
         print(f"    2. Try: taskkill /F /PID {os.getpid()}")
-        print("\n[*] This script will stay alive for 1 minutes.")
-        print("[*] (Note: Since 'Critical Status' is OFF, your PC is safe if this fails)")
-        
+        print("\n[*] This script will stay alive for 1 minute.")
+        print(
+            "[*] (Note: Since 'Critical Status' is OFF, your PC is safe if this fails)"
+        )
+
         for i in range(60, 0, -1):
             sys.stdout.write(f"\rTime remaining: {i}s   ")
             sys.stdout.flush()
             time.sleep(1)
-            
+
     else:
         print("[-] FAILED: Could not apply protection.")
         print("[TIP] Try running the terminal as Administrator!")
-        
+
 except Exception as e:
     print(f"[-] ERROR: {e}")
 

@@ -1,14 +1,16 @@
 """
 Shell Handler - Execute commands in PowerShell or CMD (Persistent/Interactive)
 """
+
 import subprocess
 import threading
 import os
 import psutil
 
+
 class ShellHandler:
     """Handles persistent remote shell sessions."""
-    
+
     def __init__(self, on_output=None, on_exit=None, on_cwd=None):
         """
         Args:
@@ -38,43 +40,58 @@ class ShellHandler:
     def start_shell(self, shell_type="ps"):
         """Start a new persistent shell process."""
         self.stop()  # Stop any existing shell
-        
+
         self.current_shell = shell_type
         self.running = True
-        
+
         try:
             if shell_type == "ps":
                 # Returns: "__CWD__C:\Path\nPS C:\Path> "
                 hack = 'function prompt { "__CWD__" + $pwd.ProviderPath + "`nPS " + $pwd.ProviderPath + "> " }'
-                args = ["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-NoLogo", "-NoExit", "-Command", hack]
+                args = [
+                    "powershell",
+                    "-NoProfile",
+                    "-ExecutionPolicy",
+                    "Bypass",
+                    "-NoLogo",
+                    "-NoExit",
+                    "-Command",
+                    hack,
+                ]
             else:
                 # CMD prompt hack: emit CWD marker then path prompt
                 # $P = Path, $G = >
                 args = ["cmd", "/k", "prompt __CWD__$P$_$P$G"]
-            
+
             # Cross-platform Popen: only use CREATE_NO_WINDOW on Windows
             popen_kwargs = {
-                'stdout': subprocess.PIPE,
-                'stderr': subprocess.STDOUT,  # Merge stderr into stdout
-                'stdin': subprocess.PIPE,
-                'text': True,
-                'bufsize': 1,  # Line-buffered (text=True requires bufsize >= 1)
+                "stdout": subprocess.PIPE,
+                "stderr": subprocess.STDOUT,  # Merge stderr into stdout
+                "stdin": subprocess.PIPE,
+                "text": True,
+                "bufsize": 1,  # Line-buffered (text=True requires bufsize >= 1)
             }
-            
+
             # Only add creationflags on Windows
-            if os.name == 'nt':
-                popen_kwargs['creationflags'] = getattr(subprocess, 'CREATE_NO_WINDOW', 0)
-            
+            if os.name == "nt":
+                popen_kwargs["creationflags"] = getattr(
+                    subprocess, "CREATE_NO_WINDOW", 0
+                )
+
             self.process = subprocess.Popen(args, **popen_kwargs)
-            
+
             # Start reader thread (Subject to merged stream)
-            t1 = threading.Thread(target=self._read_stream, args=(self.process.stdout, "stdout"), daemon=True)
+            t1 = threading.Thread(
+                target=self._read_stream,
+                args=(self.process.stdout, "stdout"),
+                daemon=True,
+            )
             self._threads = [t1]
             for t in self._threads:
                 t.start()
-                
+
             print(f"[+] Started persistent shell: {shell_type}")
-            
+
         except Exception as e:
             if self.on_output:
                 self.on_output(f"Error starting shell: {e}\n")
@@ -104,38 +121,38 @@ class ShellHandler:
                 if not char:
                     # EOF
                     break
-                
+
                 # Add to CWD buffer for marker detection
                 self._cwd_buffer += char
-                
+
                 # Check for complete __CWD__ marker pattern
                 if "__CWD__" in self._cwd_buffer:
                     # Look for the complete marker (ends at newline)
                     marker_start = self._cwd_buffer.find("__CWD__")
                     newline_pos = self._cwd_buffer.find("\n", marker_start)
-                    
+
                     if newline_pos != -1:
                         # Extract the path from marker
-                        path = self._cwd_buffer[marker_start + 7:newline_pos]
-                        
+                        path = self._cwd_buffer[marker_start + 7 : newline_pos]
+
                         # Send text before marker to output
                         text_before = self._cwd_buffer[:marker_start]
                         if text_before and self.on_output:
                             self.on_output(text_before)
-                        
+
                         # Call on_cwd callback with extracted path
                         if callable(self.on_cwd):
                             try:
                                 self.on_cwd(path)
                             except Exception:
                                 pass
-                        
+
                         # Keep text after the marker line
-                        self._cwd_buffer = self._cwd_buffer[newline_pos + 1:]
-                        
+                        self._cwd_buffer = self._cwd_buffer[newline_pos + 1 :]
+
                         # Also send the normal prompt part to output (skip the __CWD__ line)
                         continue
-                
+
                 # Flush buffer if it's getting too long without a marker
                 if len(self._cwd_buffer) > 500 and "__CWD__" not in self._cwd_buffer:
                     if self.on_output:
@@ -144,13 +161,13 @@ class ShellHandler:
                 elif len(self._cwd_buffer) > 0:
                     # If buffer doesn't start with potential marker, flush immediate
                     # Optimized: Check if buffer matches the START of marker
-                    marker_prefix = "__CWD__"[:len(self._cwd_buffer)]
+                    marker_prefix = "__CWD__"[: len(self._cwd_buffer)]
                     if self._cwd_buffer != marker_prefix:
                         # It's not the start of a marker, so it's safe to flush
                         if self.on_output:
                             self.on_output(self._cwd_buffer)
                         self._cwd_buffer = ""
-                    
+
         except (EOFError, BrokenPipeError, OSError) as e:
             # Expected stream closure errors
             print(f"[*] Shell stream closed: {type(e).__name__}")
@@ -162,9 +179,10 @@ class ShellHandler:
             if self._cwd_buffer and self.on_output:
                 try:
                     self.on_output(self._cwd_buffer)
-                except Exception: pass
+                except Exception:
+                    pass
                 self._cwd_buffer = ""
-            
+
             if self.process and self.process.poll() is not None and self.running:
                 # Process exited unexpectedly
                 self.running = False
@@ -188,4 +206,6 @@ class ShellHandler:
             self.process = None
         self.current_shell = None
         self._cwd_buffer = ""
-# alr 
+
+
+# alr

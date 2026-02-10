@@ -5,6 +5,7 @@ try:
 except ImportError:
     pyaudio = None
 
+
 class AudioPlayer:
     def __init__(self):
         self.pa = pyaudio.PyAudio() if pyaudio else None
@@ -20,7 +21,7 @@ class AudioPlayer:
             # Check if already running with an active stream
             if self.running and self.stream:
                 return True  # No-op, already started
-            
+
             # Close existing stream if orphaned
             if self.stream:
                 try:
@@ -30,7 +31,7 @@ class AudioPlayer:
                     pass
                 self.stream = None
                 self.running = False
-            
+
             # Re-init PyAudio if needed
             if not self.pa and pyaudio:
                 try:
@@ -41,12 +42,14 @@ class AudioPlayer:
 
             if not self.pa:
                 return False
-            
+
             try:
-                self.stream = self.pa.open(format=self.FORMAT,
-                                           channels=self.CHANNELS,
-                                           rate=self.RATE,
-                                           output=True)
+                self.stream = self.pa.open(
+                    format=self.FORMAT,
+                    channels=self.CHANNELS,
+                    rate=self.RATE,
+                    output=True,
+                )
                 self.running = True
                 return True
             except Exception as e:
@@ -69,7 +72,7 @@ class AudioPlayer:
                 print(f"[-] Audio Stream Close Error: {e}")
             finally:
                 self.stream = None
-    
+
     def _close_pa(self):
         """Cleanup PyAudio instance (call within lock)"""
         if self.pa:
@@ -92,4 +95,4 @@ class AudioPlayer:
                 try:
                     self.stream.write(data)
                 except Exception as e:
-                    print(f"[-] Audio Stream Write Error: {e}")# alr 
+                    print(f"[-] Audio Stream Write Error: {e}")  # alr

@@ -46,7 +46,7 @@ if %errorlevel% neq 0 (
     exit /b 1
 )
 :: 2. Build AGENT (Copied from build_all.bat)
-echo [*] Building 1/4: MyDeskAgent.exe...
+echo [*] Building 1/3: MyDeskAgent.exe...
 python -m PyInstaller --console --onefile --noupx --name MyDeskAgent ^
     --exclude-module matplotlib --exclude-module pandas ^
     --exclude-module scipy --exclude-module PyQt6 ^

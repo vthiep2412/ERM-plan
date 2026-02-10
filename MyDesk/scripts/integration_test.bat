@@ -12,7 +12,7 @@ python -m compileall -q MyDesk/targets
 if %ERRORLEVEL% NEQ 0 (
     echo [!] Phase 1 FAILED: Syntax error detected in targets!
     popd
-    pause
+    @REM pause
     exit /b 1
 )
 echo [OK] Phase 1 Passed.
@@ -25,7 +25,7 @@ if %ERRORLEVEL% NEQ 0 (
     echo [!] Phase 2 FAILED: Logical validation error!
     popd
     popd
-    pause
+    @REM pause
     exit /b 1
 )
 popd

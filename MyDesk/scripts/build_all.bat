@@ -11,7 +11,7 @@ if exist dist (
     rmdir /s /q dist
     if exist dist (
         echo [!] ERROR: Could not clean 'dist' folder. Is it open in Sandbox or Explorer?
-        pause
+        @REM pause
         exit /b
     )
 )
@@ -25,7 +25,7 @@ ver > nul
 @REM python -m pip install ...
 if %errorlevel% neq 0 (
     echo [!] Failed to install dependencies!
-    pause
+    @REM pause
     exit /b
 )
 

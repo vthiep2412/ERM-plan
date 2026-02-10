@@ -2,6 +2,7 @@
 import websockets
 from typing import Optional
 
+
 async def send_msg(ws: websockets.WebSocketClientProtocol | None, data: bytes):
     """
     Sends a message via WebSocket.
@@ -20,6 +21,7 @@ async def send_msg(ws: websockets.WebSocketClientProtocol | None, data: bytes):
     except Exception as e:
         raise ConnectionError(f"WS Send failed: {e}")
 
+
 async def recv_msg(ws: Optional[object]) -> Optional[bytes]:
     """
     Receives a message via WebSocket.
@@ -31,7 +33,7 @@ async def recv_msg(ws: Optional[object]) -> Optional[bytes]:
         data = await ws.recv()
         # Ensure it's bytes
         if isinstance(data, str):
-            data = data.encode('utf-8')
+            data = data.encode("utf-8")
         return data
     except websockets.exceptions.ConnectionClosed:
         return None

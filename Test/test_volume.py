@@ -2,6 +2,7 @@ import subprocess
 import time
 import platform
 
+
 def set_mute(mute_status: bool):
     """
     Mutes or Unmutes the system audio using C# reflection via PowerShell.
@@ -13,9 +14,9 @@ def set_mute(mute_status: bool):
 
     # Convert Python boolean to PowerShell boolean syntax
     ps_bool = "$true" if mute_status else "$false"
-    
+
     # The Fixed PowerShell Script (Flush-left to avoid indentation errors)
-    ps_script = f'''
+    ps_script = f"""
 Add-Type -TypeDefinition @"
 using System;
 using System.Runtime.InteropServices;
@@ -69,14 +70,21 @@ public class Audio {{
 }}
 "@
 [Audio]::SetMute({ps_bool})
-'''
+"""
 
     # Execute the PowerShell command silently
     try:
-        cmd = ["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", ps_script]
+        cmd = [
+            "powershell",
+            "-NoProfile",
+            "-ExecutionPolicy",
+            "Bypass",
+            "-Command",
+            ps_script,
+        ]
         # Use simple subprocess run with timeout
         result = subprocess.run(cmd, capture_output=True, text=True, timeout=10)
-        
+
         if result.returncode != 0:
             print(f"[-] Error Muting/Unmuting: {result.stderr.strip()}")
             return False
@@ -84,7 +92,7 @@ public class Audio {{
             state = "MUTED" if mute_status else "UNMUTED"
             print(f"[+] System Audio is now: {state}")
             return True
-            
+
     except subprocess.TimeoutExpired:
         print("[-] Error: PowerShell command timed out")
         return False
@@ -92,18 +100,19 @@ public class Audio {{
         print(f"[-] Execution Failed: {e}")
         return False
 
+
 # --- TEST SECTION ---
 if __name__ == "__main__":
     print("[*] Testing Audio Mute Logic...")
-    
+
     # 1. Mute
     set_mute(True)
-    
+
     # 2. Wait so you can verify
     print("[*] Waiting 3 seconds (check your speaker icon)...")
     time.sleep(3)
-    
+
     # 3. Unmute
     set_mute(False)
-    
-    print("[*] Test Complete.")# alr 
+
+    print("[*] Test Complete.")  # alr

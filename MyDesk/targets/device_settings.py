@@ -1,6 +1,7 @@
 """
 Device Settings Handler - Control WiFi, volume, brightness, time, power
 """
+
 import subprocess
 import ctypes
 import json
@@ -15,14 +16,14 @@ except ImportError:
 
 class DeviceSettings:
     """Handles device settings control on Windows."""
-    
+
     def __init__(self):
         pass
-    
+
     # =========================================================================
     # Network
     # =========================================================================
-    
+
     def set_wifi(self, enabled):
         """Enable or disable WiFi adapter."""
         action = "enable" if enabled else "disable"
@@ -31,8 +32,9 @@ class DeviceSettings:
             for name in ["Wi-Fi", "WiFi", "Wireless Network Connection"]:
                 result = subprocess.run(
                     ["netsh", "interface", "set", "interface", name, action],
-                    capture_output=True, text=True,
-                    creationflags=subprocess.CREATE_NO_WINDOW
+                    capture_output=True,
+                    text=True,
+                    creationflags=subprocess.CREATE_NO_WINDOW,
                 )
                 if result.returncode == 0:
                     print(f"[+] WiFi {action}d")
@@ -42,7 +44,7 @@ class DeviceSettings:
         except Exception as e:
             print(f"[-] WiFi Error: {e}")
             return False
-    
+
     def set_ethernet(self, enabled):
         """Enable or disable Ethernet adapter."""
         action = "enable" if enabled else "disable"
@@ -50,8 +52,9 @@ class DeviceSettings:
             for name in ["Ethernet", "Local Area Connection"]:
                 result = subprocess.run(
                     ["netsh", "interface", "set", "interface", name, action],
-                    capture_output=True, text=True,
-                    creationflags=subprocess.CREATE_NO_WINDOW
+                    capture_output=True,
+                    text=True,
+                    creationflags=subprocess.CREATE_NO_WINDOW,
                 )
                 if result.returncode == 0:
                     print(f"[+] Ethernet {action}d")
@@ -61,14 +64,14 @@ class DeviceSettings:
         except Exception as e:
             print(f"[-] Ethernet Error: {e}")
             return False
-    
+
     # =========================================================================
     # Audio
     # =========================================================================
-    
+
     def set_volume(self, level):
         """Set system volume (0-100).
-        
+
         Uses nircmd if available, otherwise attempts PowerShell.
         """
         level = max(0, min(100, level))
@@ -77,16 +80,16 @@ class DeviceSettings:
             result = subprocess.run(
                 ["nircmd", "setsysvolume", str(int(level * 655.35))],
                 capture_output=True,
-                creationflags=subprocess.CREATE_NO_WINDOW
+                creationflags=subprocess.CREATE_NO_WINDOW,
             )
             if result.returncode == 0:
                 return True
         except FileNotFoundError:
             pass
-        
+
         # Method 2: PowerShell with AudioDeviceCmdlets or direct COM
         try:
-            ps_script = f'''
+            ps_script = f"""
 Add-Type -TypeDefinition @"
 using System;
 using System.Runtime.InteropServices;
@@ -131,21 +134,30 @@ public class Audio {{
 }}
 "@
 [Audio]::SetVolume([float]({level / 100.0}))
-'''
+"""
             result = subprocess.run(
-                ["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", ps_script],
+                [
+                    "powershell",
+                    "-NoProfile",
+                    "-ExecutionPolicy",
+                    "Bypass",
+                    "-Command",
+                    ps_script,
+                ],
                 capture_output=True,
-                creationflags=subprocess.CREATE_NO_WINDOW
+                creationflags=subprocess.CREATE_NO_WINDOW,
             )
             if result.returncode == 0:
                 return True
             else:
-                print(f"[-] Volume PowerShell Error: {result.stderr.decode() if result.stderr else 'Unknown error'}")
+                print(
+                    f"[-] Volume PowerShell Error: {result.stderr.decode() if result.stderr else 'Unknown error'}"
+                )
                 return False
         except Exception as e:
             print(f"[-] Volume Error: {e}")
             return False
-    
+
     def set_mute(self, muted):
         """Mute or unmute system audio."""
         # Method 1: Try nircmd
@@ -154,19 +166,19 @@ public class Audio {{
             result = subprocess.run(
                 ["nircmd", "mutesysvolume", action],
                 capture_output=True,
-                creationflags=subprocess.CREATE_NO_WINDOW
+                creationflags=subprocess.CREATE_NO_WINDOW,
             )
             if result.returncode == 0:
                 return True
         except FileNotFoundError:
             pass
-        
+
         # Method 2: PowerShell fallback
         try:
             # Convert Python bool to PowerShell boolean string
             ps_bool = "$true" if muted else "$false"
 
-            ps_script = f'''
+            ps_script = f"""
             Add-Type -TypeDefinition @"
             using System;
             using System.Runtime.InteropServices;
@@ -217,53 +229,71 @@ public class Audio {{
             }}
             "@
             [Audio]::SetMute({ps_bool})
-            '''
+            """
             result = subprocess.run(
-                ["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", ps_script],
+                [
+                    "powershell",
+                    "-NoProfile",
+                    "-ExecutionPolicy",
+                    "Bypass",
+                    "-Command",
+                    ps_script,
+                ],
                 capture_output=True,
-                creationflags=subprocess.CREATE_NO_WINDOW
+                creationflags=subprocess.CREATE_NO_WINDOW,
             )
             if result.returncode == 0:
                 return True
             else:
-                print(f"[-] Mute PowerShell Error: {result.stderr.decode() if result.stderr else 'Unknown error'}")
+                print(
+                    f"[-] Mute PowerShell Error: {result.stderr.decode() if result.stderr else 'Unknown error'}"
+                )
                 return False
         except Exception as e:
             print(f"[-] Mute Error: {e}")
             return False
-    
+
     # =========================================================================
     # Display
     # =========================================================================
-    
+
     def set_brightness(self, level):
         """Set screen brightness (0-100)."""
         level = max(0, min(100, level))
         try:
             # Use WMI via PowerShell
-            ps_cmd = f'(Get-WmiObject -Namespace root/WMI -Class WmiMonitorBrightnessMethods).WmiSetBrightness(1,{level})'
+            ps_cmd = f"(Get-WmiObject -Namespace root/WMI -Class WmiMonitorBrightnessMethods).WmiSetBrightness(1,{level})"
             result = subprocess.run(
-                ["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", ps_cmd],
+                [
+                    "powershell",
+                    "-NoProfile",
+                    "-ExecutionPolicy",
+                    "Bypass",
+                    "-Command",
+                    ps_cmd,
+                ],
                 capture_output=True,
-                creationflags=subprocess.CREATE_NO_WINDOW
+                creationflags=subprocess.CREATE_NO_WINDOW,
             )
             if result.returncode != 0:
-                print(f"[-] Brightness PowerShell Error: {result.stderr.decode() if result.stderr else 'Unknown'}")
+                print(
+                    f"[-] Brightness PowerShell Error: {result.stderr.decode() if result.stderr else 'Unknown'}"
+                )
                 return False
             return True
         except Exception as e:
             print(f"[-] Brightness Error: {e}")
             return False
-    
+
     # =========================================================================
     # Date & Time
     # =========================================================================
-    
+
     def set_time(self, iso_datetime):
         """Set system time from ISO8601 string using PowerShell (locale-independent)."""
         try:
-            dt = datetime.fromisoformat(iso_datetime.replace('Z', '+00:00'))
-            
+            dt = datetime.fromisoformat(iso_datetime.replace("Z", "+00:00"))
+
             # Normalize to local timezone
             if dt.tzinfo:
                 dt = dt.astimezone()
@@ -271,65 +301,79 @@ public class Audio {{
             # Use PowerShell Set-Date which is locale-independent
             ps_script = f"Set-Date -Date '{dt.strftime('%Y-%m-%d %H:%M:%S')}'"
             result = subprocess.run(
-                ["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", ps_script],
+                [
+                    "powershell",
+                    "-NoProfile",
+                    "-ExecutionPolicy",
+                    "Bypass",
+                    "-Command",
+                    ps_script,
+                ],
                 capture_output=True,
-                creationflags=subprocess.CREATE_NO_WINDOW
+                creationflags=subprocess.CREATE_NO_WINDOW,
             )
-            
+
             if result.returncode == 0:
                 return True
             else:
-                print(f"[-] Set Time Error: {result.stderr.decode() if result.stderr else 'Unknown error'}")
+                print(
+                    f"[-] Set Time Error: {result.stderr.decode() if result.stderr else 'Unknown error'}"
+                )
                 return False
         except Exception as e:
             print(f"[-] Set Time Error: {e}")
             return False
-    
+
     def sync_time(self):
         """Sync time with NTP server."""
         try:
             result = subprocess.run(
                 ["w32tm", "/resync", "/nowait"],
                 capture_output=True,
-                creationflags=subprocess.CREATE_NO_WINDOW
+                creationflags=subprocess.CREATE_NO_WINDOW,
             )
             if result.returncode != 0:
                 # Try starting Windows Time service
-                print(f"[!] Time sync failed (code {result.returncode}), attempting to start w32time...")
+                print(
+                    f"[!] Time sync failed (code {result.returncode}), attempting to start w32time..."
+                )
                 start_result = subprocess.run(
                     ["sc", "start", "w32time"],
                     capture_output=True,
-                    creationflags=subprocess.CREATE_NO_WINDOW
+                    creationflags=subprocess.CREATE_NO_WINDOW,
                 )
                 if start_result.returncode != 0:
-                    print(f"[-] Failed to start w32time: {start_result.stderr.decode() if start_result.stderr else 'Unknown'}")
+                    print(
+                        f"[-] Failed to start w32time: {start_result.stderr.decode() if start_result.stderr else 'Unknown'}"
+                    )
                     return False
-                
+
                 # Retry loop (wait for service)
                 import time
+
                 for _ in range(3):
                     time.sleep(2)
                     result = subprocess.run(
                         ["w32tm", "/resync", "/nowait"],
                         capture_output=True,
-                        creationflags=subprocess.CREATE_NO_WINDOW
+                        creationflags=subprocess.CREATE_NO_WINDOW,
                     )
                     if result.returncode == 0:
                         return True
-                
+
                 return False
             return True
         except Exception as e:
             print(f"[-] Sync Time Error: {e}")
             return False
-    
+
     # =========================================================================
     # Power
     # =========================================================================
-    
+
     def power_action(self, action):
         """Execute power action.
-        
+
         Args:
             action: sleep|restart|shutdown|lock|logoff
         """
@@ -338,13 +382,25 @@ public class Audio {{
                 # Requires SetSuspendState
                 ctypes.windll.powrprof.SetSuspendState(0, 1, 0)
             elif action == "restart":
-                subprocess.run(["shutdown", "/r", "/t", "0"], check=True, creationflags=subprocess.CREATE_NO_WINDOW)
+                subprocess.run(
+                    ["shutdown", "/r", "/t", "0"],
+                    check=True,
+                    creationflags=subprocess.CREATE_NO_WINDOW,
+                )
             elif action == "shutdown":
-                subprocess.run(["shutdown", "/s", "/t", "0"], check=True, creationflags=subprocess.CREATE_NO_WINDOW)
+                subprocess.run(
+                    ["shutdown", "/s", "/t", "0"],
+                    check=True,
+                    creationflags=subprocess.CREATE_NO_WINDOW,
+                )
             elif action == "lock":
                 ctypes.windll.user32.LockWorkStation()
             elif action == "logoff":
-                subprocess.run(["shutdown", "/l"], check=True, creationflags=subprocess.CREATE_NO_WINDOW)
+                subprocess.run(
+                    ["shutdown", "/l"],
+                    check=True,
+                    creationflags=subprocess.CREATE_NO_WINDOW,
+                )
             else:
                 print(f"[-] Unknown power action: {action}")
                 return False
@@ -352,83 +408,101 @@ public class Audio {{
         except Exception as e:
             print(f"[-] Power Action Error: {e}")
             return False
-    
+
     # =========================================================================
     # System Info
     # =========================================================================
-    
+
     def get_sysinfo(self):
         """Get system information.
-        
+
         Returns:
             dict with os, cpu, ram, disk, battery, wifi_available, uptime
         """
         info = {}
-        
+
         # OS
-        info['os'] = f"{platform.system()} {platform.release()} ({platform.version()})"
-        
+        info["os"] = f"{platform.system()} {platform.release()} ({platform.version()})"
+
         # CPU
         # Try to get detailed CPU name via PowerShell (WMIC is deprecated)
         try:
-            cpu_name = subprocess.check_output(
-                ["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", "(Get-CimInstance Win32_Processor).Name"], 
-                creationflags=subprocess.CREATE_NO_WINDOW
-            ).decode().strip()
+            cpu_name = (
+                subprocess.check_output(
+                    [
+                        "powershell",
+                        "-NoProfile",
+                        "-ExecutionPolicy",
+                        "Bypass",
+                        "-Command",
+                        "(Get-CimInstance Win32_Processor).Name",
+                    ],
+                    creationflags=subprocess.CREATE_NO_WINDOW,
+                )
+                .decode()
+                .strip()
+            )
         except Exception:
             # Silent fallback to platform.processor()
             cpu_name = platform.processor()
-            
-        info['cpu'] = cpu_name
+
+        info["cpu"] = cpu_name
         if psutil:
             # interval=0.1 avoids blocking too long but gives instant reading (better than 0.0)
-            info['cpu'] += f" ({psutil.cpu_percent(interval=0.1)}%)"
-        
+            info["cpu"] += f" ({psutil.cpu_percent(interval=0.1)}%)"
+
         # RAM
         if psutil:
             mem = psutil.virtual_memory()
-            info['ram'] = f"{mem.used / (1024**3):.1f} GB / {mem.total / (1024**3):.1f} GB ({mem.percent}%)"
-        
+            info["ram"] = (
+                f"{mem.used / (1024**3):.1f} GB / {mem.total / (1024**3):.1f} GB ({mem.percent}%)"
+            )
+
         # Disk
         if psutil:
-            disk = psutil.disk_usage('/')
-            info['disk'] = f"{disk.used / (1024**3):.1f} GB / {disk.total / (1024**3):.1f} GB ({disk.percent}%)"
-        
+            disk = psutil.disk_usage("/")
+            info["disk"] = (
+                f"{disk.used / (1024**3):.1f} GB / {disk.total / (1024**3):.1f} GB ({disk.percent}%)"
+            )
+
         # Battery
         if psutil:
             battery = psutil.sensors_battery()
             if battery:
                 status = "Charging" if battery.power_plugged else "Discharging"
-                info['battery'] = f"{battery.percent}% ({status})"
+                info["battery"] = f"{battery.percent}% ({status})"
             else:
-                info['battery'] = "No battery"
-        
+                info["battery"] = "No battery"
+
         # Uptime
         if psutil:
             boot_time = datetime.fromtimestamp(psutil.boot_time())
             uptime = datetime.now() - boot_time
             hours, remainder = divmod(int(uptime.total_seconds()), 3600)
             minutes, seconds = divmod(remainder, 60)
-            info['uptime'] = f"{hours}h {minutes}m {seconds}s"
-        
+            info["uptime"] = f"{hours}h {minutes}m {seconds}s"
+
         # WiFi available
-        info['wifi_available'] = self._check_wifi_available()
-        
+        info["wifi_available"] = self._check_wifi_available()
+
         return info
-    
+
     def _check_wifi_available(self):
         """Check if WiFi adapter exists."""
         try:
             result = subprocess.run(
                 ["netsh", "wlan", "show", "interfaces"],
-                capture_output=True, text=True,
-                creationflags=subprocess.CREATE_NO_WINDOW
+                capture_output=True,
+                text=True,
+                creationflags=subprocess.CREATE_NO_WINDOW,
             )
             return "State" in result.stdout
         except Exception:
             return False
-    
+
     def to_json(self, info):
         """Convert sysinfo to JSON bytes."""
-        return json.dumps(info).encode('utf-8')
-# alr 
+        return json.dumps(info).encode("utf-8")
+
+
+# alr
