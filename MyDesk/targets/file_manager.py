@@ -361,6 +361,3 @@ class FileManager:
         if path:
             data["path"] = path
         return json.dumps(data).encode("utf-8")
-
-
-# alr

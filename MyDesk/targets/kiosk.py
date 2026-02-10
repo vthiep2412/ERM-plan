@@ -243,5 +243,3 @@ if __name__ == "__main__":
 
     app = KioskApp(mode=args.mode)
     app.start()
-
-# alr

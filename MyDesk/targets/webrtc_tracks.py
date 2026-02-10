@@ -177,6 +177,3 @@ def create_webcam_track(webcam_streamer, resource_manager=None):
     if not AIORTC_AVAILABLE:
         raise RuntimeError("aiortc required for WebRTC tracks")
     return WebcamTrack(webcam_streamer, resource_manager)
-
-
-# alr

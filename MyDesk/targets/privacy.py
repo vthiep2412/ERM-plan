@@ -59,7 +59,7 @@ class PrivacyCurtain:
 
             while True:
                 # Check for thread exit request (optional, but good for cleanup)
-                if not getattr(self, "_thread_running", True):
+                if not self._thread_running:
                     break
 
                 try:
@@ -88,6 +88,8 @@ class PrivacyCurtain:
             print(f"[-] Privacy Thread Crash: {e}")
 
     def enable(self):
+        if self.active:
+            return  # Already enabled
         self.active = True
         self._thread_running = True
         self._thread = threading.Thread(target=self._show_curtain, daemon=True)
@@ -98,7 +100,9 @@ class PrivacyCurtain:
         if not self.active:
             return
         self.active = False
+        self._thread_running = False
         # The thread loop will see this flag, exit, and destroy the window
         if self._thread:
             self._thread.join(timeout=1.0)
+            self._thread = None
         print("[-] Privacy Curtain Disabled")

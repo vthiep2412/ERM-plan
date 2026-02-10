@@ -75,9 +75,9 @@ def update_machine():
     data = request.json
     pwd = data.get("password")
 
-    if not pwd or not secrets.compare_digest(pwd, os.environ.get("REGISTRY_PASSWORD", "")):
+    if not isinstance(pwd, str) or not pwd or not secrets.compare_digest(pwd, os.environ.get("REGISTRY_PASSWORD", "")):
         return jsonify({"error": "Access Denied: Invalid Master Password"}), 403
-
+    
     # Auth OK, update DB
     db = get_db()
     if not db:
@@ -107,7 +107,7 @@ def discover():
     pwd = data.get("password")
 
     # Allow empty password in dev if env var not set (optional, strictly enforcing for now)
-    if not pwd or not secrets.compare_digest(pwd, os.environ.get("REGISTRY_PASSWORD", "")):
+    if not isinstance(pwd, str) or not pwd or not secrets.compare_digest(pwd, os.environ.get("REGISTRY_PASSWORD", "")):
         return jsonify({"error": "Access Denied: Invalid Master Password"}), 403
 
     db = get_db()
@@ -163,8 +163,8 @@ def delete_machine():
     data = request.json
     pwd = data.get("password")
 
-    if not pwd or not secrets.compare_digest(pwd, os.environ.get("REGISTRY_PASSWORD", "")):
-        return jsonify({"error": "Access Denied"}), 403
+    if not isinstance(pwd, str) or not pwd or not secrets.compare_digest(pwd, os.environ.get("REGISTRY_PASSWORD", "")):
+        return jsonify({"error": "Access Denied: Invalid Master Password"}), 403
 
     db = get_db()
     if not db:

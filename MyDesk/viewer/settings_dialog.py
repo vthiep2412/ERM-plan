@@ -117,8 +117,9 @@ class SettingsDialog(QDialog):
         safety_group = QGroupBox("Security")
         safety_layout = QVBoxLayout(safety_group)
         self.safety_check = QCheckBox("Safety Mode (Protect System Files)")
-        self.safety_check.setChecked(self.settings.get("safety_mode", True))
-        self.safety_check.setStyleSheet("color: #22c55e;")
+        is_safe = self.settings.get("safety_mode", True)
+        self.safety_check.setChecked(is_safe)
+        self.safety_check.setStyleSheet(f"color: {'#22c55e' if is_safe else '#CCCCCC'};")
         self.safety_check.clicked.connect(self.on_safety_toggle)
         safety_layout.addWidget(self.safety_check)
         
@@ -178,7 +179,6 @@ class SettingsDialog(QDialog):
                 )
 
                 if reply2 == QMessageBox.StandardButton.Yes:
-                    self.safety_check.setChecked(False)
                     self.safety_check.setStyleSheet("color: #FF5555;")
                     return
 

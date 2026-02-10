@@ -428,8 +428,8 @@ class ClientManager(QMainWindow):
         if self.session:
             try:
                 self.session.close()
-            except Exception:
-                pass
+            except Exception as e:
+                print(f"[-] Failed to close previous session: {e}")
 
         self.session = SessionWindow(url, target_id=None)
         self.session.show()
