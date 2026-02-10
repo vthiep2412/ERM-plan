@@ -456,7 +456,7 @@ class TrollHandler:
                 try:
                     user32.ReleaseDC(0, hdc)
                     user32.InvalidateRect(0, 0, True)
-                except:
+                except Exception:
                     pass
 
         self.overlay_thread = threading.Thread(target=loop, daemon=True)
@@ -494,6 +494,3 @@ class TrollHandler:
                 winsound.PlaySound(None, winsound.SND_PURGE)
             except Exception:
                 pass
-
-
-# alr

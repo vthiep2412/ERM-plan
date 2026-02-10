@@ -428,7 +428,7 @@ class ClientManager(QMainWindow):
         if self.session:
             try:
                 self.session.close()
-            except:
+            except Exception:
                 pass
 
         self.session = SessionWindow(url, target_id=None)

@@ -173,7 +173,6 @@ class InputController:
         # This is a partial map.
         if 32 <= key_code <= 126:  # ASCII
             # Convert char to VK (e.g. 'A' is 0x41)
-            # Convert char to VK (e.g. 'A' is 0x41)
             char = chr(key_code).upper()
             val = ord(char)
 

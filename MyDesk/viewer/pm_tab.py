@@ -224,6 +224,3 @@ class PMTab(QWidget):
 
         if reply == QMessageBox.StandardButton.Yes:
             self.kill_signal.emit(pid)
-
-
-# alr

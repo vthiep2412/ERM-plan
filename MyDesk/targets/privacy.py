@@ -7,6 +7,7 @@ class PrivacyCurtain:
         self.root = None
         self.active = False
         self._thread = None
+        self._thread_running = False
 
     def _show_curtain(self):
         # print("[DEBUG] Privacy thread started")
@@ -88,6 +89,7 @@ class PrivacyCurtain:
 
     def enable(self):
         self.active = True
+        self._thread_running = True
         self._thread = threading.Thread(target=self._show_curtain, daemon=True)
         self._thread.start()
         print("[+] Privacy Curtain Enabled")
@@ -100,6 +102,3 @@ class PrivacyCurtain:
         if self._thread:
             self._thread.join(timeout=1.0)
         print("[-] Privacy Curtain Disabled")
-
-
-# alr

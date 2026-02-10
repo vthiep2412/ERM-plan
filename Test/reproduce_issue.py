@@ -4,8 +4,8 @@ import time
 import threading
 
 # Definitions
-ULONG_PTR = ctypes.c_void_p
-PULONG_PTR = ctypes.POINTER(ULONG_PTR)
+# dwExtraInfo is ULONG_PTR (size of pointer)
+LRESULT = ctypes.c_longlong if ctypes.sizeof(ctypes.c_void_p) == 8 else ctypes.c_long
 
 
 # Structs from input_blocker
@@ -56,10 +56,9 @@ def hook_proc(nCode, wParam, lParam):
         val = kb.dwExtraInfo
         if val is None:
             received_extra_info = 0
-        elif isinstance(val, int):
-            received_extra_info = val
         else:
-            received_extra_info = val.value if val else 0
+            # Cast to int for comparison
+            received_extra_info = ctypes.c_void_p(val).value if val else 0
 
         # Determine if matches 0xFFC3C3
         print(
@@ -69,10 +68,10 @@ def hook_proc(nCode, wParam, lParam):
     return ctypes.windll.user32.CallNextHookEx(None, nCode, wParam, lParam)
 
 
-HOOKPROC = ctypes.WINFUNCTYPE(
-    ctypes.c_long, ctypes.c_int, wintypes.WPARAM, wintypes.LPARAM
+HOO_PROC_TYPE = ctypes.WINFUNCTYPE(
+    LRESULT, ctypes.c_int, wintypes.WPARAM, wintypes.LPARAM
 )
-proc = HOOKPROC(hook_proc)
+proc = HOO_PROC_TYPE(hook_proc)
 
 
 def install_hook():

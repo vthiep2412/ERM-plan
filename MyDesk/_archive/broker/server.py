@@ -136,6 +136,10 @@ async def bridge_sockets(ws_a, ws_b):
     done, pending = await asyncio.wait([t1, t2], return_when=asyncio.FIRST_COMPLETED)
     for task in pending:
         task.cancel()
+    
+    # Wait for tasks to finish to allow `finally` blocks to run
+    if pending:
+        await asyncio.gather(*pending, return_exceptions=True)
 
 
 async def main():

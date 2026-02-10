@@ -113,4 +113,3 @@ class BSODScreen:
 if __name__ == "__main__":
     bsod = BSODScreen()
     bsod.start()
-# alr

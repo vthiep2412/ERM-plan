@@ -201,4 +201,3 @@ class WebRTCClient(QObject if PYQT_AVAILABLE else object):
 OP_RTC_OFFER = 0x05
 OP_RTC_ANSWER = 0x06
 OP_ICE_CANDIDATE = 0x07
-# alr

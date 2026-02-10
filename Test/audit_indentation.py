@@ -8,9 +8,9 @@ def check_indentation(directory):
     
     python_files = []
     for root, dirs, files in os.walk(directory):
-        # Skip hidden and non-source directories
-        if any(d in root for d in [".git", ".gemini", "node_modules", "dist", "build", "__pycache__"]):
-            continue
+        # Filter directories in-place to skip hidden and build folders
+        dirs[:] = [d for d in dirs if not d.startswith('.') and d not in ['build', 'dist', '__pycache__', 'node_modules']]
+        
         for file in files:
             if file.endswith(".py"):
                 python_files.append(os.path.join(root, file))

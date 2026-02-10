@@ -40,6 +40,7 @@ class FileManager:
                       If None, allows access to entire filesystem (admin mode).
         """
         self.base_dir = os.path.realpath(base_dir) if base_dir else None
+        self.safety_mode = True  # Default to ON
 
     def _is_safe_path(self, path):
         """Check if path is safe (inside base_dir if set).
@@ -297,12 +298,13 @@ class FileManager:
             norm_real_path = os.path.normcase(real_path)
 
             # Check against forbidden paths
-            if (
-                norm_real_path in self.FORBIDDEN_PATHS
-                or os.path.normcase(real_path.rstrip("/\\")) in self.FORBIDDEN_PATHS
-            ):
-                print(f"[-] Delete blocked: Cannot delete system path: {real_path}")
-                return False
+            if self.safety_mode:
+                if (
+                    norm_real_path in self.FORBIDDEN_PATHS
+                    or os.path.normcase(real_path.rstrip("/\\")) in self.FORBIDDEN_PATHS
+                ):
+                    print(f"[-] Delete blocked (Safety Mode): Cannot delete system path: {real_path}")
+                    return False
 
             # Check if path is a root drive
             if sys.platform == "win32":

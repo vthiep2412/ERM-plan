@@ -46,8 +46,11 @@ class AudioStreamer:
                 wasapi_info["defaultOutputDevice"]
             )
 
-            if not default_speakers["isLoopbackDevice"]:
-                # If default isn't loopback, try to find the loopback version of it
+            if default_speakers["isLoopbackDevice"]:
+                # If default is already a loopback device, return it directly
+                return default_speakers
+
+            # If default isn't loopback, try to find the loopback version of it
                 # pyaudiowpatch exposes loopback devices as separate inputs
                 for i in range(self.pa.get_device_count()):
                     dev = self.pa.get_device_info_by_index(i)

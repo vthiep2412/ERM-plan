@@ -503,6 +503,3 @@ public class Audio {{
     def to_json(self, info):
         """Convert sysinfo to JSON bytes."""
         return json.dumps(info).encode("utf-8")
-
-
-# alr

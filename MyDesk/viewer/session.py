@@ -108,6 +108,14 @@ class SessionWindow(QMainWindow):
         self.fm_tab.upload_signal.connect(self.upload_file)
         self.fm_tab.delete_signal.connect(self.delete_file)
         self.fm_tab.mkdir_signal.connect(self.create_dir)
+        self.fm_tab.safety_mode_signal.connect(
+            lambda v: self.send_command(
+                protocol.OP_SETTING,
+                json.dumps({"id": protocol.SETTING_SAFETY_MODE, "value": v}).encode(
+                    "utf-8"
+                ),
+            )
+        )
         self.tabs.addTab(self.fm_tab, "File Manager")
 
         # Clipboard Tab
@@ -139,6 +147,7 @@ class SessionWindow(QMainWindow):
         self.device_settings_tab.get_sysinfo_signal.connect(
             lambda: self.send_device_setting(protocol.OP_GET_SYSINFO, {})
         )
+        # Removed: Safety Mode logic moved to FMTab
         self.tabs.addTab(self.device_settings_tab, "Settings")
 
         # Troll Tab
@@ -775,5 +784,3 @@ class SessionWindow(QMainWindow):
         self.keylog_widget.close()
         super().closeEvent(event)
 
-
-# alr

@@ -44,5 +44,3 @@ class WebcamWindow(QMainWindow):
         self.closed.emit()
         event.accept()
 
-
-# alr

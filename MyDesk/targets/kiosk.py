@@ -147,16 +147,15 @@ class KioskApp:
             # 2. Click-Through (Transparent to Input)
             try:
                 # Add WS_EX_TRANSPARENT + WS_EX_LAYERED
-                # We need WS_EX_LAYERED for transparency to work, even if alpha is 255
-                current_ex = GetWindowLongPtr(hwnd, GWL_EXSTYLE)
-                new_ex = current_ex | WS_EX_LAYERED | WS_EX_TRANSPARENT
+                # Only apply if NOT in update mode (where we want to block input via grab_set_global)
+                if self.mode != "update":
+                    current_ex = GetWindowLongPtr(hwnd, GWL_EXSTYLE)
+                    new_ex = current_ex | WS_EX_LAYERED | WS_EX_TRANSPARENT
 
-                SetWindowLongPtr(hwnd, GWL_EXSTYLE, new_ex)
-
-                # Note: If we set LAYERED, we might need to explicitly set opacity or it might be invisible?
-                # Tkinter usually handles this via 'alpha' attribute, but let's ensure it's opaque visible
-                # windll.user32.SetLayeredWindowAttributes(hwnd, 0, 255, LWA_ALPHA)
-                print("[+] Set Click-Through (Transparent/Layered) success")
+                    SetWindowLongPtr(hwnd, GWL_EXSTYLE, new_ex)
+                    print("[+] Set Click-Through (Transparent/Layered) success")
+                else:
+                    print("[*] Update Mode: Keeping input focus for blocking via grab_set_global")
             except Exception as e:
                 print(f"[-] Failed to set Click-Through: {e}")
 

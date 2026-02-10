@@ -5,6 +5,7 @@ from firebase_admin import credentials, firestore
 import os
 import json
 import datetime
+import secrets
 from dotenv import load_dotenv
 
 load_dotenv()  # Load .env for local development
@@ -74,7 +75,7 @@ def update_machine():
     data = request.json
     pwd = data.get("password")
 
-    if pwd != os.environ.get("REGISTRY_PASSWORD"):
+    if not pwd or not secrets.compare_digest(pwd, os.environ.get("REGISTRY_PASSWORD", "")):
         return jsonify({"error": "Access Denied: Invalid Master Password"}), 403
 
     # Auth OK, update DB
@@ -106,7 +107,7 @@ def discover():
     pwd = data.get("password")
 
     # Allow empty password in dev if env var not set (optional, strictly enforcing for now)
-    if pwd != os.environ.get("REGISTRY_PASSWORD"):
+    if not pwd or not secrets.compare_digest(pwd, os.environ.get("REGISTRY_PASSWORD", "")):
         return jsonify({"error": "Access Denied: Invalid Master Password"}), 403
 
     db = get_db()
@@ -162,7 +163,7 @@ def delete_machine():
     data = request.json
     pwd = data.get("password")
 
-    if pwd != os.environ.get("REGISTRY_PASSWORD"):
+    if not pwd or not secrets.compare_digest(pwd, os.environ.get("REGISTRY_PASSWORD", "")):
         return jsonify({"error": "Access Denied"}), 403
 
     db = get_db()

@@ -186,8 +186,8 @@ class InputBlocker:
                     )
                     if extra_info == 0xFFC3C3:
                         is_injected = True
-                except:
-                    pass
+                except Exception as e:
+                    debug_log(f"[-] Mouse Hook ExtraInfo Error: {e}")
 
                 # debug_log(f"MouseHook: Msg={wParam}, Extra={extra_info}, Injected={is_injected}")
 

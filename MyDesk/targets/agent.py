@@ -159,13 +159,15 @@ class AsyncAgent:
         self.webcam = WebcamStreamer(quality=40)  # Retain original webcam settings
         self.mic = AudioStreamer()
         self.input_ctrl = InputController()
-        # Privacy component (Disabled: depends on tkinter)
-        # self.privacy = None
-
-        # FIX: Store background tasks to prevent garbage collection (Task destroyed error)
+        # Privacy component
+        self.privacy = PrivacyCurtain()
+        self.clipboard_consent = False
+        self.process_mgr = ProcessManager()
+        self.file_mgr = FileManager()  # Initialize in Admin Mode (None) by default
+        self.safety_mode_enabled = True # Default to ON
+        self.file_mgr.safety_mode = True # Initial state
         self.background_tasks = set()
         self.consecutive_heartbeat_fails = 0
-        # self.privacy = PrivacyCurtain() # Retain original curtain init
 
         # New Handlers
         self.shell_handler = ShellHandler(
@@ -639,21 +641,7 @@ class AsyncAgent:
         """Cleanup WebRTC, Kiosk, and Connection State"""
         print("[*] Cleaning up Session State...")
 
-        # 1. Stop Kiosk / Curtain
-        # if self.kiosk_process:
-        #     try:
-        #         print("[*] Killing Kiosk Process...")
-        #         self.kiosk_process.terminate()
-        #         self.kiosk_process.wait(timeout=2)
-        #     except subprocess.TimeoutExpired:
-        #         print("[!] Kiosk did not terminate, killing...")
-        #         self.kiosk_process.kill()
-        #         self.kiosk_process.wait(timeout=2)
-        #     except Exception:
-        #         pass # Ignore other errors
-        #     self.kiosk_process = None
-
-        # 2. Reset Resource Manager
+        # 1. Reset Resource Manager
         try:
             if self.resource_mgr:
                 self.resource_mgr.set_viewer_connected(False)
@@ -661,7 +649,7 @@ class AsyncAgent:
         except Exception:
             pass
 
-        # 3. Stop WebRTC
+        # 2. Stop WebRTC
         if self.webrtc_handler:
             try:
                 await self.webrtc_handler.close()
@@ -669,22 +657,22 @@ class AsyncAgent:
                 pass
             self.webrtc_handler = None
 
-        # 4. Stop Webcam
+        # 3. Stop Webcam
         if self.cam_streaming:
             self.webcam.stop()
             self.cam_streaming = False
 
-        # 5. Stop System Audio
+        # 4. Stop System Audio
         if hasattr(self, "audio_streaming") and self.audio_streaming:
             if hasattr(self, "audio_handler"):
                 self.audio_handler.stop_loopback()
             self.audio_streaming = False
 
-        # 6. Stop Mic
+        # 5. Stop Mic
         self.mic_streaming = False  # Break mic loop
         self.streaming = False  # Break screen loop
 
-        # 7. Unblock Input (CRITICAL SAFETY)
+        # 6. Unblock Input (CRITICAL SAFETY)
         try:
             self.input_ctrl.block_input(False)
         except:
@@ -1386,6 +1374,23 @@ class AsyncAgent:
                             self._send_async(protocol.OP_CLIP_HISTORY_DATA, data)
                     except Exception as e:
                         print(f"[-] Clip Consent Error: {e}")
+
+                elif opcode == protocol.OP_SETTING:
+                    try:
+                        data = json.loads(payload.decode("utf-8"))
+                        setting_id = data.get("id")
+                        value = bool(data.get("value", False))
+
+                        if setting_id == protocol.SETTING_BLOCK_INPUT:
+                            # Existing logic
+                            pass
+                        elif setting_id == protocol.SETTING_SAFETY_MODE:
+                            self.safety_mode_enabled = value
+                            if self.file_mgr:
+                                self.file_mgr.safety_mode = value
+                            print(f"[+] Safety Mode Updated: {self.safety_mode_enabled}")
+                    except Exception as e:
+                        print(f"[-] Setting Error: {e}")
 
                 # ================================================================
                 # WebRTC Signaling (Project Supersonic)

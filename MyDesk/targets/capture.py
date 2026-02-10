@@ -175,14 +175,12 @@ class DeltaScreenCapturer:
         #     return None  # Skip - frame unchanged
         # self._last_frame_hash = frame_hash
 
-        # Draw remote cursor functionality
-        frame_array = self._draw_cursor(frame_array)
+        # Draw remote cursor functionality - Removed redundant call
+        # frame_array = self._draw_cursor(frame_array)
 
         # Always send keyframe for now (delta frames need debugging)
         # TODO: Re-enable delta frames after fixing decoder
         return self._encode_keyframe(frame_array)
-
-        return None
 
     def _draw_cursor(self, frame_array):
         """Draw cursor overlay on frame with offset correction and click-reactive colors"""

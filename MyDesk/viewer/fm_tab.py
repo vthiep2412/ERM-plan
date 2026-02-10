@@ -16,6 +16,7 @@ from PyQt6.QtWidgets import (
     QMenu,
     QComboBox,
     QInputDialog,
+    QCheckBox,
 )
 from PyQt6.QtCore import pyqtSignal, Qt
 from PyQt6.QtGui import QAction
@@ -34,6 +35,7 @@ class FMTab(QWidget):
     upload_signal = pyqtSignal(str, bytes)  # Upload file (remote_path, data)
     delete_signal = pyqtSignal(str)  # Delete file/folder
     mkdir_signal = pyqtSignal(str)  # Create directory
+    safety_mode_signal = pyqtSignal(bool)  # Toggle Safety Mode
 
     def __init__(self):
         super().__init__()
@@ -95,6 +97,13 @@ class FMTab(QWidget):
         action_bar.addWidget(self.upload_btn)
         action_bar.addWidget(self.new_folder_btn)
         action_bar.addStretch()
+
+        # Safety Mode Toggle
+        self.safety_check = QCheckBox("Safety Mode")
+        self.safety_check.setChecked(True)
+        self.safety_check.setStyleSheet("color: #22c55e; font-weight: bold; margin-right: 10px;")
+        self.safety_check.clicked.connect(self.on_safety_toggle)
+        action_bar.addWidget(self.safety_check)
 
         layout.addLayout(action_bar)
 
@@ -302,6 +311,36 @@ class FMTab(QWidget):
             # Use ntpath for Windows remote path construction
             folder_path = ntpath.join(self.current_path, name)
             self.mkdir_signal.emit(folder_path)
+
+    def on_safety_toggle(self, checked):
+        """Handle safety mode toggle with confirmation"""
+        if not checked:
+            reply1 = QMessageBox.warning(
+                self,
+                "Security Warning",
+                "Disabling Safety Mode allows DELETION of system folders.\n"
+                "This can render the computer unbootable.\n\n"
+                "Do you really want to disable this protection?",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            )
+            if reply1 == QMessageBox.StandardButton.Yes:
+                reply2 = QMessageBox.critical(
+                    self,
+                    "FINAL WARNING",
+                    "UNSAFE MODE ACTIVATED.\n"
+                    "The creator of MyDesk is not responsible for OS damage.\n\n"
+                    "CONFIRM DISABLE?",
+                    QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                )
+                if reply2 == QMessageBox.StandardButton.Yes:
+                    self.safety_check.setStyleSheet("color: #FF5555; font-weight: bold; margin-right: 10px;")
+                    self.safety_mode_signal.emit(False)
+                    return
+            
+            self.safety_check.setChecked(True)
+        else:
+            self.safety_check.setStyleSheet("color: #22c55e; font-weight: bold; margin-right: 10px;")
+            self.safety_mode_signal.emit(True)
 
     def update_data(self, files, path=None):
         """Update table with file list.

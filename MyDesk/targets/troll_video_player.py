@@ -191,4 +191,3 @@ if __name__ == "__main__":
 
     player = TrollVideoPlayer(video_path)
     player.start()
-# alr

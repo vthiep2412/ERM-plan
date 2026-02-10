@@ -12,6 +12,8 @@ from PyQt6.QtWidgets import (
     QSlider,
     QPushButton,
     QGroupBox,
+    QCheckBox,
+    QMessageBox,
 )
 from PyQt6.QtCore import Qt, pyqtSignal
 
@@ -56,6 +58,7 @@ class SettingsDialog(QDialog):
             "quality": 50,
             "scale": 90,
             "format": "JPEG",
+            "safety_mode": True,
         }
 
         self.setup_ui()
@@ -110,6 +113,21 @@ class SettingsDialog(QDialog):
         format_layout.addWidget(self.format_combo)
         layout.addWidget(format_group)
 
+        # Safety Mode
+        safety_group = QGroupBox("Security")
+        safety_layout = QVBoxLayout(safety_group)
+        self.safety_check = QCheckBox("Safety Mode (Protect System Files)")
+        self.safety_check.setChecked(self.settings.get("safety_mode", True))
+        self.safety_check.setStyleSheet("color: #22c55e;")
+        self.safety_check.clicked.connect(self.on_safety_toggle)
+        safety_layout.addWidget(self.safety_check)
+        
+        lbl_hint = QLabel("Prevents deletion of critical folders (Windows, Program Files, etc.)")
+        lbl_hint.setWordWrap(True)
+        lbl_hint.setStyleSheet("color: #888; font-size: 10px; margin-top: 5px;")
+        safety_layout.addWidget(lbl_hint)
+        layout.addWidget(safety_group)
+
         # Buttons
         btn_layout = QHBoxLayout()
         btn_cancel = QPushButton("Cancel")
@@ -129,12 +147,45 @@ class SettingsDialog(QDialog):
             "quality": self.quality_slider.value(),
             "scale": self.scale_slider.value(),
             "format": self.format_combo.currentText(),
+            "safety_mode": self.safety_check.isChecked(),
         }
         self.settings_saved.emit(self.settings)
         self.accept()
 
+    def on_safety_toggle(self, checked):
+        """Double confirmation for disabling safety mode"""
+        if not checked:
+            # First warning
+            reply1 = QMessageBox.warning(
+                self,
+                "Security Warning",
+                "Disabling Safety Mode will allow the viewer to DELETE critical system folders and drives.\n\n"
+                "This could PERMANENTLY DAMAGE the target operating system.\n\n"
+                "Are you sure you want to proceed?",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            )
+
+            if reply1 == QMessageBox.StandardButton.Yes:
+                # Second warning
+                reply2 = QMessageBox.critical(
+                    self,
+                    "CRITICAL CONFIRMATION",
+                    "THIS IS DANGEROUS.\n\n"
+                    "By clicking YES, you confirm that you take full responsibility for any "
+                    "instability or data loss caused by unauthorized file system operations.\n\n"
+                    "STILL PROCEED?",
+                    QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                )
+
+                if reply2 == QMessageBox.StandardButton.Yes:
+                    self.safety_check.setChecked(False)
+                    self.safety_check.setStyleSheet("color: #FF5555;")
+                    return
+
+            # Revert check if any "No" or dialog closed
+            self.safety_check.setChecked(True)
+        else:
+            self.safety_check.setStyleSheet("color: #22c55e;")
+
     def get_settings(self):
         return self.settings
-
-
-# alr

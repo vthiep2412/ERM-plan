@@ -8,20 +8,19 @@ def check_indentation(directory):
 
     python_files = []
     for root, dirs, files in os.walk(directory):
-        if "node_modules" in root or ".git" in root or ".gemini" in root:
-            continue
+        dirs[:] = [d for d in dirs if d not in {"node_modules", ".git", ".gemini"}]
         for file in files:
             if file.endswith(".py"):
                 python_files.append(os.path.join(root, file))
 
     total_issues = 0
     for file_path in python_files:
-        with open(file_path, "r", encoding="utf-8") as f:
-            try:
+        try:
+            with open(file_path, "r", encoding="utf-8") as f:
                 lines = f.readlines()
-            except UnicodeDecodeError:
-                continue
-
+        except (UnicodeDecodeError, OSError) as e:
+            print(f"[!] Error reading {file_path}: {e}")
+            continue
         file_issues = []
         for i, line in enumerate(lines, 1):
             # Check for tabs
@@ -56,9 +55,8 @@ def check_indentation(directory):
     else:
         print(f"[*] Total indentation issues found: {total_issues}")
         print(
-            "[TIP] You can fix these automatically by running: pip install black && black MyDesk"
+            f"[TIP] You can fix these automatically by running: python -m black {directory}"
         )
-
 
 if __name__ == "__main__":
     check_indentation("MyDesk")

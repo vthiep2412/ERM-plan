@@ -51,10 +51,10 @@ class ScreenShareTrack(VideoStreamTrack):
         if self._start_time is None:
             self._start_time = time.time()
             # Instant Start: Force a fresh frame immediately
-            if hasattr(self.capturer, "frame_count"):
-                self.capturer.frame_count = (
-                    self.capturer.keyframe_interval - 1
-                )  # Next frame will be keyframe
+            if hasattr(self.capturer, "frame_count") and hasattr(self.capturer, "keyframe_interval"):
+                interval = getattr(self.capturer, "keyframe_interval", 1)
+                if interval < 1: interval = 1
+                self.capturer.frame_count = interval - 1  # Next frame will be keyframe
 
         # Calculate target frame time
         if self.resource_manager:

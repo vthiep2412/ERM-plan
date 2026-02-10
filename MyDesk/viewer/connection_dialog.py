@@ -42,6 +42,7 @@ class ConnectionDialog(QDialog):
 
         self.setup_ui()
         self.current_step = 0
+        self._connection_succeeded = False
         self.steps = ["🔌 Connecting...", "🤝 Handshaking...", "✅ Connected!"]
 
     def setup_ui(self):
@@ -100,7 +101,8 @@ class ConnectionDialog(QDialog):
 
     def set_success(self):
         """Show success state and auto-close"""
-        self.set_step(3)
+        self._connection_succeeded = True
+        self.set_step(2)
         self.status_label.setStyleSheet("color: #4CAF50;")
         QTimer.singleShot(500, self.accept)
 
@@ -111,9 +113,6 @@ class ConnectionDialog(QDialog):
 
     def closeEvent(self, event):
         """Emit cancelled signal if closed before success"""
-        if self.current_step < 3:
+        if not self._connection_succeeded:
             self.cancelled.emit()
         super().closeEvent(event)
-
-
-# alr

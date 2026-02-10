@@ -206,6 +206,3 @@ class ShellHandler:
             self.process = None
         self.current_shell = None
         self._cwd_buffer = ""
-
-
-# alr

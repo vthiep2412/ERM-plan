@@ -246,4 +246,4 @@ class ShellTab(QWidget):
 
     def clear_output(self):
         self.output.clear()
-        self.stdout_buffer = ""  # alr
+        self.stdout_buffer = ""
