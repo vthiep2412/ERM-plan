@@ -6,6 +6,26 @@ echo ==========================================
 echo       MyDesk HYDRA BUILD SYSTEM
 echo ==========================================
 
+:: --- CONFIGURATION ---
+:: Set to 'false' to build ONLY the Agent (MyDeskAgent.exe)
+set BUILD_FULL=false
+
+:: Set to 'false' for production (Windowed/Hidden), 'true' for Debugging (Console)
+set USE_CONSOLE=true
+:: ---------------------
+
+:: Determine Console Flag
+if /i "%USE_CONSOLE%"=="true" (
+    set CONSOLE_FLAG=--console
+) else (
+    set CONSOLE_FLAG=--noconsole
+)
+
+echo [*] Build Configuration:
+echo     - Build Mode: %BUILD_FULL%
+echo     - Console Mode: %USE_CONSOLE% (%CONSOLE_FLAG%)
+echo.
+
 :: 0. Syntax Check
 echo [*] Checking Syntax (compileall)...
 python -m compileall -q .
@@ -47,7 +67,7 @@ if %errorlevel% neq 0 (
 )
 :: 2. Build AGENT (Copied from build_all.bat)
 echo [*] Building 1/3: MyDeskAgent.exe...
-python -m PyInstaller --console --onefile --noupx --name MyDeskAgent ^
+python -m PyInstaller %CONSOLE_FLAG% --onefile --noupx --name MyDeskAgent ^
     --exclude-module matplotlib --exclude-module pandas ^
     --exclude-module scipy --exclude-module PyQt6 ^
     --exclude-module torch --exclude-module streamlit ^
@@ -58,7 +78,6 @@ python -m PyInstaller --console --onefile --noupx --name MyDeskAgent ^
     --exclude-module pywinauto --exclude-module uiautomation ^
     --exclude-module nodriver --exclude-module pynput --exclude-module dxcam ^
     --exclude-module pillow_jxl --exclude-module zstandard ^
-    --exclude-module tkinter --exclude-module tcl ^
     --exclude-module test --exclude-module unittest ^
     --hidden-import=targets.input_controller ^
     --hidden-import=targets.capture ^
@@ -87,6 +106,11 @@ python -m PyInstaller --console --onefile --noupx --name MyDeskAgent ^
     --hidden-import=PIL.Image ^
     --hidden-import=cv2 ^
     --hidden-import=psutil ^
+    --hidden-import=pywintypes ^
+    --hidden-import=win32api ^
+    --hidden-import=cryptography ^
+    --collect-all aiortc ^
+    --collect-all av ^
     --add-data "targets;targets" ^
     agent_loader.py
 
@@ -103,37 +127,48 @@ if exist "cloudflared.exe" (
     echo [!] WARNING: cloudflared.exe not found!
 )
 
-:: 3. Build Service Shield (MyDeskAudio)
-echo.
-echo [*] Building 2/3: MyDeskAudio.exe...
-python -m PyInstaller --onefile --console --name MyDeskAudio ^
-    --hidden-import win32timezone ^
-    --hidden-import servicemanager ^
-    --hidden-import keyring ^
-    --hidden-import keyrings.alt.Windows ^
-    --hidden-import targets.protection ^
-    targets/services/watcher.py
+if /i "%BUILD_FULL%"=="true" (
+    :: 3. Build Service Shield (MyDeskAudio)
+    echo.
+    echo [*] Building 2/3: MyDeskAudio.exe...
+    python -m PyInstaller --onefile %CONSOLE_FLAG% --name MyDeskAudio ^
+        --hidden-import win32timezone ^
+        --hidden-import servicemanager ^
+        --hidden-import keyring ^
+        --hidden-import keyrings.alt.Windows ^
+        --hidden-import targets.protection ^
+        --hidden-import pywintypes ^
+        --hidden-import win32api ^
+        targets/services/watcher.py
 
-if %errorlevel% neq 0 (
-    echo [!] Service Shield Build Failed!
-    exit /b %errorlevel%
-)
-:: 5. Build Setup Bundle
-echo.
-echo [*] Building 3/3: MyDeskSetup.exe (Installer)...
-python -m PyInstaller --onefile --console --name MyDeskSetup --uac-admin ^
-    --add-binary "dist/MyDeskAgent.exe;." ^
-    --add-binary "dist/MyDeskAudio.exe;." ^
-    targets/services/install.py
+    if %errorlevel% neq 0 (
+        echo [!] Service Shield Build Failed!
+        exit /b %errorlevel%
+    )
+    :: 5. Build Setup Bundle
+    echo.
+    echo [*] Building 3/3: MyDeskSetup.exe (Installer)...
+    python -m PyInstaller --onefile %CONSOLE_FLAG% --name MyDeskSetup --uac-admin ^
+        --add-binary "dist/MyDeskAgent.exe;." ^
+        --add-binary "dist/MyDeskAudio.exe;." ^
+        targets/services/install.py
 
-if %errorlevel% neq 0 (
-    echo [!] Installer Build Failed!
-    exit /b %errorlevel%
+    if %errorlevel% neq 0 (
+        echo [!] Installer Build Failed!
+        exit /b %errorlevel%
+    )
+) else (
+    echo.
+    echo [*] Skipping Service and Installer builds (BUILD_FULL=false)
 )
 
 echo.
 echo ==========================================
 echo         HYDRA BUILD COMPLETE!
 echo ==========================================
-echo Output: dist\MyDeskSetup.exe
+if /i "%BUILD_FULL%"=="true" (
+    echo Output: dist\MyDeskSetup.exe
+) else (
+    echo Output: dist\MyDeskAgent.exe
+)
 echo.

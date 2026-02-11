@@ -5,6 +5,7 @@ Uses H.264 for optimal performance.
 """
 
 import logging
+import asyncio
 
 try:
     from aiortc import (
@@ -134,6 +135,9 @@ class WebRTCHandler:
         self.relay = MediaRelay()
         self.on_track_callback = on_track_callback
         self.on_ice_candidate_callback = on_ice_candidate_callback
+        
+        # Async Lock for thread-safe candidate access
+        self._ice_candidates_lock = asyncio.Lock()
 
         # Track state
         self.screen_track = None
@@ -164,6 +168,14 @@ class WebRTCHandler:
             elif state in ("failed", "closed", "disconnected"):
                 self.connected = False
 
+        @self.pc.on("track")
+        async def on_track(track):
+            if self.on_track_callback:
+                if asyncio.iscoroutinefunction(self.on_track_callback):
+                    await self.on_track_callback(track)
+                else:
+                    self.on_track_callback(track)
+
         @self.pc.on("icecandidate")
         async def on_icecandidate(candidate):
             if candidate:
@@ -172,7 +184,9 @@ class WebRTCHandler:
                     "sdpMid": candidate.sdpMid,
                     "sdpMLineIndex": candidate.sdpMLineIndex,
                 }
-                self.ice_candidates.append(candidate_dict)
+                async with self._ice_candidates_lock:
+                    self.ice_candidates.append(candidate_dict)
+                
                 if self.on_ice_candidate_callback:
                     if asyncio.iscoroutinefunction(self.on_ice_candidate_callback):
                         await self.on_ice_candidate_callback(candidate_dict)
@@ -263,10 +277,11 @@ class WebRTCHandler:
         relayed_track = self.relay.subscribe(track)
         self.pc.addTrack(relayed_track)
 
-    def get_pending_ice_candidates(self) -> list:
+    async def get_pending_ice_candidates(self) -> list:
         """Get and clear pending ICE candidates"""
-        candidates = self.ice_candidates.copy()
-        self.ice_candidates.clear()
+        async with self._ice_candidates_lock:
+            candidates = self.ice_candidates.copy()
+            self.ice_candidates.clear()
         return candidates
 
     async def close(self):
@@ -278,8 +293,8 @@ class WebRTCHandler:
 
 
 # Factory function
-def create_webrtc_handler(on_track_callback=None) -> WebRTCHandler:
+def create_webrtc_handler(on_track_callback=None, on_ice_candidate_callback=None) -> WebRTCHandler:
     """Create a new WebRTC handler instance"""
     if not AIORTC_AVAILABLE:
         raise RuntimeError("aiortc not available")
-    return WebRTCHandler(on_track_callback)
+    return WebRTCHandler(on_track_callback, on_ice_candidate_callback)

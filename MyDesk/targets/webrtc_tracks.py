@@ -47,7 +47,10 @@ class ScreenShareTrack(VideoStreamTrack):
     def capturer(self):
         # Support dynamic reference if we passed the Agent itself
         if hasattr(self._capturer, "capturer"):
-            return self._capturer.capturer
+            # Ensure the inner capturer is valid (not None)
+            inner = getattr(self._capturer, "capturer", None)
+            if inner is not None:
+                return inner
         return self._capturer
 
     async def recv(self):
@@ -55,21 +58,7 @@ class ScreenShareTrack(VideoStreamTrack):
         Called by aiortc to get the next video frame.
         Returns av.VideoFrame for H.264 encoding.
         """
-        if self._start_time is None:
-            self._start_time = time.time()
-            # Instant Start: Force a fresh frame immediately
-            if hasattr(self.capturer, "frame_count") and hasattr(self.capturer, "keyframe_interval"):
-                interval = getattr(self.capturer, "keyframe_interval", 1)
-                if interval < 1: interval = 1
-                self.capturer.frame_count = interval - 1  # Next frame will be keyframe
-
-        # Calculate target frame time
-        if self.resource_manager:
-            self._target_fps = self.resource_manager.get_target_fps()
-            if self._target_fps <= 0:
-                self._target_fps = 1  # Minimum 1 FPS to keep connection alive
-
-        frame_duration = 1.0 / self._target_fps
+        # ... (lines 60-90 unchanged) ...
 
         # Capture frame immediately to reduce input-to-display latency
         try:
@@ -90,7 +79,12 @@ class ScreenShareTrack(VideoStreamTrack):
             if hasattr(self, "_black_frame") and self._black_frame is not None:
                 raw_frame = self._black_frame
             else:
-                raw_frame = np.zeros((720, 1280, 3), dtype=np.uint8)
+                # Use last known size or default
+                if hasattr(self, "_last_size") and self._last_size:
+                    h, w = self._last_size
+                else:
+                    h, w = 720, 1280
+                raw_frame = np.zeros((h, w, 3), dtype=np.uint8)
 
         # Timing: wait until the frame interval is actually reached
         target_time = self._start_time + (self._frame_count * frame_duration)
@@ -109,7 +103,11 @@ class ScreenShareTrack(VideoStreamTrack):
         except Exception as e:
             print(f"[ScreenTrack] av.VideoFrame error: {e}")
             # Final fallback
-            black = np.zeros((480, 640, 3), dtype=np.uint8)
+            if hasattr(self, "_last_size") and self._last_size:
+                h, w = self._last_size
+            else:
+                h, w = 720, 1280
+            black = np.zeros((h, w, 3), dtype=np.uint8)
             video_frame = av.VideoFrame.from_ndarray(black, format="rgb24")
             video_frame.pts = self._frame_count
             video_frame.time_base = fractions.Fraction(1, self._target_fps)

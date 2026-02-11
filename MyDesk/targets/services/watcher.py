@@ -123,26 +123,71 @@ def perform_atomic_update():
             if download_url.startswith("/"):
                 download_url = REGISTRY_BASE + download_url
 
-            # 2. Download to .tmp (Standard SSL)
+            # 2. Download to .tmp
             tmp_exe = AGENT_EXE + ".tmp"
+            download_success = False
             try:
-                # Standard urllib (Uses Windows System Certs)
-                with urllib.request.urlopen(download_url, timeout=60) as response:
-                    with open(tmp_exe, "wb") as f:
-                        f.write(response.read())
-            except Exception as e:
-                print(f"[-] Download Failed: {e}")
+                print(f"[*] Attempting update download from: {download_url}")
+                
+                # --- Method 1: urllib ---
+                try:
+                    with urllib.request.urlopen(download_url, timeout=60) as response:
+                        with open(tmp_exe, "wb") as f:
+                            while True:
+                                chunk = response.read(64 * 1024)
+                                if not chunk:
+                                    break
+                                f.write(chunk)
+                    download_success = True
+                    print("[+] urllib update download success")
+                except Exception as e:
+                    print(f"[*] urllib update failed ({e}), trying System Curl fallback...")
+                    
+                    # --- Method 2: Curl ---
+                    try:
+                        subprocess.run(
+                            ["curl", "-L", "-f", "-o", tmp_exe, download_url],
+                            check=True,
+                            stdout=subprocess.DEVNULL,
+                            stderr=subprocess.DEVNULL
+                        )
+                        download_success = True
+                        print("[+] Curl update download success")
+                    except (subprocess.CalledProcessError, FileNotFoundError):
+                        
+                        # --- Method 3: PowerShell ---
+                        print("[*] Curl failed, trying PowerShell update fallback...")
+                        ps_cmd = f"Invoke-WebRequest -Uri '{download_url}' -OutFile '{tmp_exe}'"
+                        subprocess.run(
+                            ["powershell", "-NoProfile", "-Command", ps_cmd],
+                            check=True,
+                            stdout=subprocess.DEVNULL,
+                            stderr=subprocess.DEVNULL
+                        )
+                        download_success = True
+                        print("[+] PowerShell update download success")
+
+            except Exception as final_e:
+                print(f"[-] All update download methods failed: {final_e}")
+                if os.path.exists(tmp_exe):
+                    try:
+                        os.remove(tmp_exe)
+                    except: pass
                 return False
 
-            # 3. Stop Agent to release file lock
+            if not download_success or not os.path.exists(tmp_exe) or os.path.getsize(tmp_exe) == 0:
+                print("[-] Update failed: Downloaded file is invalid or missing.")
+                return False
+
+            # 3. Stop Agent to release file lock (Immediately before swap)
             subprocess.run(
                 ["taskkill", "/F", "/IM", "MyDeskAgent.exe"],
                 shell=False,
                 capture_output=True,
             )
-            time.sleep(2)
+            time.sleep(1) # Brief wait for OS to release handles
 
-            # 4. Atomic Swap
+            # 4. Atomic Swap with Rollback capability
             if os.path.exists(tmp_exe):
                 try:
                     os.replace(tmp_exe, AGENT_EXE)
@@ -153,7 +198,11 @@ def perform_atomic_update():
                 except Exception as swap_err:
                     print(f"[-] Atomic Swap Failed: {swap_err}")
                     if os.path.exists(tmp_exe):
-                        os.remove(tmp_exe)
+                        try:
+                            os.remove(tmp_exe)
+                        except: pass
+                    # Attempt to restart old agent if swap failed
+                    start_agent_as_user() 
     except Exception as e:
         print(f"[-] Update Error: {e}")
     return False
@@ -222,111 +271,113 @@ def start_agent_as_user():
 
         if session_id == 0xFFFFFFFF:
             log("No active session found (User likely logged out).")
-            return  # No active session
+            return False  # No active session
 
-        # 2. Get User Token
+        # 2. Get User Token & 3. Duplicate
         token = c_void_p()
-        # WTSQueryUserToken(SessionId, phToken)
-        if not windll.wtsapi32.WTSQueryUserToken(session_id, byref(token)):
-            err = windll.kernel32.GetLastError()
-            log(f"WTSQueryUserToken Failed. Error: {err}")
-            return
-
-        # 3. Duplicate Token (Primary)
         primary_token = c_void_p()
-        # SecurityImpersonation=2, TokenPrimary=1
-        if not windll.advapi32.DuplicateTokenEx(
-            token, 0, None, 2, 1, byref(primary_token)
-        ):
-            err = windll.kernel32.GetLastError()
-            log(f"DuplicateTokenEx Failed. Error: {err}")
-            windll.kernel32.CloseHandle(token)
-            return
+        
+        try:
+            # WTSQueryUserToken(SessionId, phToken)
+            if not windll.wtsapi32.WTSQueryUserToken(session_id, byref(token)):
+                err = windll.kernel32.GetLastError()
+                log(f"WTSQueryUserToken Failed. Error: {err}")
+                return False
 
-        # 4. Environment Block (Optional but good)
-        env = c_void_p()
-        if not windll.userenv.CreateEnvironmentBlock(byref(env), primary_token, False):
-            log("CreateEnvironmentBlock Failed (Non-critical)")
-            env = None
+            # Duplicate Token (Primary)
+            # SecurityImpersonation=2, TokenPrimary=1
+            if not windll.advapi32.DuplicateTokenEx(
+                token, 0, None, 2, 1, byref(primary_token)
+            ):
+                err = windll.kernel32.GetLastError()
+                log(f"DuplicateTokenEx Failed. Error: {err}")
+                return False
 
-        # 5. Startup Info
-        class STARTUPINFO(ctypes.Structure):
-            _fields_ = [
-                ("cb", ctypes.c_ulong),
-                ("lpReserved", ctypes.c_wchar_p),
-                ("lpDesktop", ctypes.c_wchar_p),
-                ("lpTitle", ctypes.c_wchar_p),
-                ("dwX", ctypes.c_ulong),
-                ("dwY", ctypes.c_ulong),
-                ("dwXSize", ctypes.c_ulong),
-                ("dwYSize", ctypes.c_ulong),
-                ("dwXCountChars", ctypes.c_ulong),
-                ("dwYCountChars", ctypes.c_ulong),
-                ("dwFillAttribute", ctypes.c_ulong),
-                ("dwFlags", ctypes.c_ulong),
-                ("wShowWindow", ctypes.c_ushort),
-                ("cbReserved2", ctypes.c_ushort),
-                ("lpReserved2", ctypes.c_void_p),
-                ("hStdInput", ctypes.c_void_p),
-                ("hStdOutput", ctypes.c_void_p),
-                ("hStdError", ctypes.c_void_p),
-            ]
+            # 4. Environment Block (Optional but good)
+            env = c_void_p()
+            if not windll.userenv.CreateEnvironmentBlock(byref(env), primary_token, False):
+                log("CreateEnvironmentBlock Failed (Non-critical)")
+                env = None
 
-        si = STARTUPINFO()
-        si.cb = ctypes.sizeof(STARTUPINFO)
-        si.lpDesktop = "winsta0\\default"  # Target User Desktop
-        si.wShowWindow = 1  # SW_NORMAL (Let's make it visible for now!)
-        si.dwFlags = 1  # STARTF_USESHOWWINDOW
+            # 5. Startup Info
+            class STARTUPINFO(ctypes.Structure):
+                _fields_ = [
+                    ("cb", ctypes.c_ulong),
+                    ("lpReserved", ctypes.c_wchar_p),
+                    ("lpDesktop", ctypes.c_wchar_p),
+                    ("lpTitle", ctypes.c_wchar_p),
+                    ("dwX", ctypes.c_ulong),
+                    ("dwY", ctypes.c_ulong),
+                    ("dwXSize", ctypes.c_ulong),
+                    ("dwYSize", ctypes.c_ulong),
+                    ("dwXCountChars", ctypes.c_ulong),
+                    ("dwYCountChars", ctypes.c_ulong),
+                    ("dwFillAttribute", ctypes.c_ulong),
+                    ("dwFlags", ctypes.c_ulong),
+                    ("wShowWindow", ctypes.c_ushort),
+                    ("cbReserved2", ctypes.c_ushort),
+                    ("lpReserved2", ctypes.c_void_p),
+                    ("hStdInput", ctypes.c_void_p),
+                    ("hStdOutput", ctypes.c_void_p),
+                    ("hStdError", ctypes.c_void_p),
+                ]
 
-        # 6. Process Info
-        class PROCESS_INFORMATION(ctypes.Structure):
-            _fields_ = [
-                ("hProcess", ctypes.c_void_p),
-                ("hThread", ctypes.c_void_p),
-                ("dwProcessId", ctypes.c_ulong),
-                ("dwThreadId", ctypes.c_ulong),
-            ]
+            si = STARTUPINFO()
+            si.cb = ctypes.sizeof(STARTUPINFO)
+            si.lpDesktop = "winsta0\\default"  # Target User Desktop
+            si.wShowWindow = 1  # SW_NORMAL (Let's make it visible for now!)
+            si.dwFlags = 1  # STARTF_USESHOWWINDOW
 
-        pi = PROCESS_INFORMATION()
+            # 6. Process Info
+            class PROCESS_INFORMATION(ctypes.Structure):
+                _fields_ = [
+                    ("hProcess", ctypes.c_void_p),
+                    ("hThread", ctypes.c_void_p),
+                    ("dwProcessId", ctypes.c_ulong),
+                    ("dwThreadId", ctypes.c_ulong),
+                ]
 
-        # 7. Create Process As User
-        # CreateProcessAsUserW(hToken, lpapp, lpcmd, ...)
-        cmd = f'"{AGENT_EXE}"'  # Command line MUST include executable path if lpApplicationName is None
-        # CREATE_UNICODE_ENVIRONMENT (0x400) | CREATE_NEW_CONSOLE (0x10)
-        dwCreationFlags = 0x00000410
+            pi = PROCESS_INFORMATION()
 
-        log(f"Attempting launch: {cmd} with flags {hex(dwCreationFlags)}")
+            # 7. Create Process As User
+            cmd = f'"{AGENT_EXE}"'
+            dwCreationFlags = 0x00000410
 
-        success = windll.advapi32.CreateProcessAsUserW(
-            primary_token,
-            None,
-            cmd,
-            None,
-            None,
-            False,
-            dwCreationFlags,
-            env,
-            os.path.dirname(AGENT_EXE),
-            byref(si),
-            byref(pi),
-        )
+            log(f"Attempting launch: {cmd} with flags {hex(dwCreationFlags)}")
 
-        # Cleanup
-        if env:
-            windll.userenv.DestroyEnvironmentBlock(env)
-        windll.kernel32.CloseHandle(token)
-        windll.kernel32.CloseHandle(primary_token)
+            success = windll.advapi32.CreateProcessAsUserW(
+                primary_token,
+                None,
+                cmd,
+                None,
+                None,
+                False,
+                dwCreationFlags,
+                env,
+                os.path.dirname(AGENT_EXE),
+                byref(si),
+                byref(pi),
+            )
 
-        if success:
-            log(f"SUCCESS! PID: {pi.dwProcessId}")
-            windll.kernel32.CloseHandle(pi.hProcess)
-            windll.kernel32.CloseHandle(pi.hThread)
-            # Log success if needed
-            return True
-        else:
-            err = windll.kernel32.GetLastError()
-            log(f"CreateProcessAsUserW Failed. Error: {err}")
-            return False
+            # Cleanup Env
+            if env:
+                windll.userenv.DestroyEnvironmentBlock(env)
+
+            if success:
+                log(f"SUCCESS! PID: {pi.dwProcessId}")
+                windll.kernel32.CloseHandle(pi.hProcess)
+                windll.kernel32.CloseHandle(pi.hThread)
+                return True
+            else:
+                err = windll.kernel32.GetLastError()
+                log(f"CreateProcessAsUserW Failed. Error: {err}")
+                return False
+
+        finally:
+            if token:
+                windll.kernel32.CloseHandle(token)
+            if primary_token:
+                windll.kernel32.CloseHandle(primary_token)
 
     except Exception:
         return False
@@ -375,8 +426,13 @@ class WatcherService(win32serviceutil.ServiceFramework):
             if not is_process_running("MyDeskAgent.exe"):
                 # If Agent is missing or needs update (checked periodically)
                 if not os.path.exists(AGENT_EXE):
-                    perform_atomic_update()  # Download initial version
-                start_agent_as_user()
+                    if perform_atomic_update():
+                        start_agent_as_user()
+                    else:
+                        # Log failure? (Already logged in perform_atomic_update)
+                        pass
+                else:
+                    start_agent_as_user()
 
             # 3. AUTO-UPDATE: Check every ~15 minutes (225 ticks @ 4s)
             if ticks >= 225:
@@ -394,7 +450,7 @@ if __name__ == "__main__":
         WatcherService._svc_name_ = SERVICE_NAME
         WatcherService._svc_display_name_ = SERVICE_DISPLAY
         WatcherService._svc_description_ = (
-            "Manages advanced audio and persistence for MyDesk."
+            "MyDesk Agent watchdog and auto-update service."
         )
 
         # FROZEN SERVICE HANDLER

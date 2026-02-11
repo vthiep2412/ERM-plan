@@ -7,7 +7,6 @@ import shutil
 import tempfile
 import urllib.request
 import urllib.error
-import ssl
 
 CLOUDFLARED_URL = "https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-windows-amd64.exe"
 CLOUDFLARED_BIN = "cloudflared.exe"
@@ -54,15 +53,61 @@ class TunnelManager:
             tmp_path = path + ".tmp"
             try:
                 print(f"[*] Attempting download to: {path}")
+                
+                # --- Method 1: Standard urllib (Priority) ---
+                try:
+                    import hashlib
+                    sha256_hash = hashlib.sha256()
+                    max_size = 100 * 1024 * 1024 # 100MB Limit
+                    downloaded = 0
 
-                # Standard urllib (Uses Windows System Certs)
-                with urllib.request.urlopen(CLOUDFLARED_URL, timeout=60) as response:
-                    with open(tmp_path, "wb") as f:
-                        f.write(response.read())
+                    with urllib.request.urlopen(CLOUDFLARED_URL, timeout=60) as response:
+                        with open(tmp_path, "wb") as f:
+                            while True:
+                                chunk = response.read(64 * 1024)
+                                if not chunk:
+                                    break
+                                downloaded += len(chunk)
+                                if downloaded > max_size:
+                                    raise Exception("Download exceeded max size")
+                                sha256_hash.update(chunk)
+                                f.write(chunk)
+                    
+                    print(f"[+] urllib Download Success: {path}")
+
+                except Exception as e:
+                    print(f"[*] urllib failed ({e}), trying System Curl fallback...")
+                    
+                    # --- Method 2: System Curl Fallback ---
+                    try:
+                        subprocess.run(
+                            ["curl", "-L", "-f", "-o", tmp_path, CLOUDFLARED_URL],
+                            check=True,
+                            stdout=subprocess.DEVNULL,
+                            stderr=subprocess.DEVNULL,
+                            creationflags=0x08000000 # CREATE_NO_WINDOW
+                        )
+                        print(f"[+] Curl Download Success: {path}")
+                    except (subprocess.CalledProcessError, FileNotFoundError):
+                        
+                        # --- Method 3: PowerShell Fallback ---
+                        print("[*] Curl failed, trying PowerShell...")
+                        ps_cmd = f"Invoke-WebRequest -Uri '{CLOUDFLARED_URL}' -OutFile '{tmp_path}'"
+                        subprocess.run(
+                            ["powershell", "-NoProfile", "-Command", ps_cmd],
+                            check=True,
+                            stdout=subprocess.DEVNULL,
+                            stderr=subprocess.DEVNULL,
+                            creationflags=0x08000000
+                        )
+                        print(f"[+] PowerShell Download Success: {path}")
+
+                # Verify file exists and is valid after all attempts
+                if not os.path.exists(tmp_path) or os.path.getsize(tmp_path) == 0:
+                    raise Exception("All download methods failed (Zero bytes or missing)")
 
                 # Atomic move
                 os.replace(tmp_path, path)
-                print(f"[+] Download Success: {path}")
                 return True
             except Exception as e:
                 print(f"[-] Download to {path} failed: {e}")
@@ -140,8 +185,9 @@ class TunnelManager:
 
     def _parse_output(self):
         # Cloudflared prints the URL to stderr usually
-        while self.running and self.process:
-            line = self.process.stderr.readline()
+        local_proc = self.process
+        while self.running and local_proc:
+            line = local_proc.stderr.readline()
             if not line:
                 break
 
@@ -221,6 +267,17 @@ class TunnelManager:
                         print(
                             f"[!] Immortal Watchdog: Tunnel is STUCK (No URL for {self.STUCK_TIMEOUT}s). Force restarting..."
                         )
+                        # Force kill current process if alive
+                        if self.process:
+                            try:
+                                self.process.terminate()
+                                try:
+                                    self.process.wait(timeout=3)
+                                except subprocess.TimeoutExpired:
+                                    self.process.kill()
+                            except:
+                                pass
+                            self.process = None
                         self._restart_tunnel()
                         fail_count += 1
             except Exception as e:
@@ -253,7 +310,6 @@ class TunnelManager:
                 startupinfo=startupinfo,
                 text=True,
                 bufsize=1,
-                universal_newlines=True,
             )
 
             # Restart URL parser
