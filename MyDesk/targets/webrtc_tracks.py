@@ -58,7 +58,10 @@ class ScreenShareTrack(VideoStreamTrack):
         Called by aiortc to get the next video frame.
         Returns av.VideoFrame for H.264 encoding.
         """
-        # ... (lines 60-90 unchanged) ...
+        if self._start_time is None:
+            self._start_time = time.time()
+
+        frame_duration = 1.0 / self._target_fps
 
         # Capture frame immediately to reduce input-to-display latency
         try:

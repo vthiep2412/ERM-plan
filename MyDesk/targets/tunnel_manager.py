@@ -56,8 +56,6 @@ class TunnelManager:
                 
                 # --- Method 1: Standard urllib (Priority) ---
                 try:
-                    import hashlib
-                    sha256_hash = hashlib.sha256()
                     max_size = 100 * 1024 * 1024 # 100MB Limit
                     downloaded = 0
 
@@ -70,7 +68,6 @@ class TunnelManager:
                                 downloaded += len(chunk)
                                 if downloaded > max_size:
                                     raise Exception("Download exceeded max size")
-                                sha256_hash.update(chunk)
                                 f.write(chunk)
                     
                     print(f"[+] urllib Download Success: {path}")
@@ -275,7 +272,7 @@ class TunnelManager:
                                     self.process.wait(timeout=3)
                                 except subprocess.TimeoutExpired:
                                     self.process.kill()
-                            except:
+                            except Exception:
                                 pass
                             self.process = None
                         self._restart_tunnel()
@@ -338,7 +335,7 @@ class TunnelManager:
                     self.process.wait(timeout=3)
                 except subprocess.TimeoutExpired:
                     self.process.kill()
-            except:
+            except Exception:
                 pass
         self._restart_tunnel()
 

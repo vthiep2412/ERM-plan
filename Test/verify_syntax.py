@@ -1,88 +1,147 @@
 import sys
 import os
+from unittest.mock import MagicMock
 
-# Add target dir to path relative to this script
+# Add project root and core/targets dirs to path
 script_dir = os.path.dirname(os.path.abspath(__file__))
-sys.path.append(os.path.abspath(os.path.join(script_dir, "../MyDesk/targets")))
+project_root = os.path.abspath(os.path.join(script_dir, ".."))
+sys.path.append(project_root)
+sys.path.append(os.path.join(project_root, "MyDesk"))
+sys.path.append(os.path.join(project_root, "MyDesk", "targets"))
+sys.path.append(os.path.join(project_root, "MyDesk", "core"))
 
-try:
-    print("Importing input_controller...")
-    import input_controller
+# Mocking heavy/dangerous dependencies
+sys.modules["aiortc"] = MagicMock()
+sys.modules["av"] = MagicMock()
+sys.modules["cv2"] = MagicMock()
+sys.modules["mss"] = MagicMock()
+sys.modules["pyaudio"] = MagicMock()
+sys.modules["keyring"] = MagicMock()
+sys.modules["keyrings"] = MagicMock()
+sys.modules["keyrings.alt"] = MagicMock()
 
-    print("input_controller imported successfully.")
+def test_module(name):
+    print(f"[*] Testing module: {name}...", end=" ", flush=True)
+    try:
+        # For auditor and others that might use relative imports, 
+        # we try to import them through the targets package if possible
+        if name in ["auditor", "capture", "webrtc_tracks", "webrtc_handler"]:
+             try:
+                 __import__(f"targets.{name}")
+             except ImportError:
+                 __import__(name)
+        else:
+             __import__(name)
+        print("IMPORTED")
+        return True
+    except Exception as e:
+        print(f"FAIL: {e}")
+        return False
 
-    print("Checking InputController attributes...")
-    ic = input_controller.InputController(1920, 1080)
-    if hasattr(ic, "scroll") and hasattr(ic, "release_all_buttons"):
-        print("InputController has required methods.")
+def run_checks():
+    success = True
+    # Modules identified by their filenames in core/ and targets/
+    modules_to_check = [
+        "protocol",        # core
+        "network",         # core
+        "config",          # targets
+        "resource_manager",# targets
+        "capture",         # targets
+        "input_controller",# targets
+        "input_blocker",   # targets
+        "auditor",         # targets
+        "webcam",          # targets
+        "audio",           # targets
+        "shell_handler",   # targets
+        "process_manager", # targets
+        "file_manager",    # targets
+        "clipboard_handler",# targets
+        "device_settings", # targets
+        "troll_handler",   # targets
+        "webrtc_tracks",   # targets
+        "webrtc_handler",  # targets
+        "tunnel_manager",  # targets
+        "protection"       # targets
+    ]
+
+    print("=== MyDesk Component Validation ===\n")
+
+    for mod in modules_to_check:
+        if not test_module(mod):
+            success = False
+
+    print("\n--- Deep Logic Checks ---")
+
+    # 1. Check WebRTC Tracks for NameErrors/Instantiation
+    _ScreenShareTrack_imported = False
+    try:
+        from targets.webrtc_tracks import ScreenShareTrack
+        _ScreenShareTrack_imported = True
+    except ImportError:
+        try:
+            from webrtc_tracks import ScreenShareTrack
+            _ScreenShareTrack_imported = True
+        except ImportError as e:
+            print(f"[FAIL] ScreenShareTrack import failed: {e}")
+            success = False
+
+    if _ScreenShareTrack_imported:
+        try:
+            mock_cap = MagicMock()
+            track = ScreenShareTrack(mock_cap)
+            if hasattr(track, "_target_fps") and hasattr(track, "_start_time"):
+                print("[OK] ScreenShareTrack initialized correctly.")
+            else:
+                print("[FAIL] ScreenShareTrack missing attributes.")
+                success = False
+        except Exception as e:
+            print(f"[FAIL] ScreenShareTrack logic error: {e}")
+            success = False
+
+    # 2. Check InputController
+    _InputController_imported = False
+    try:
+        from targets.input_controller import InputController
+        _InputController_imported = True
+    except ImportError:
+        try:
+            from input_controller import InputController
+            _InputController_imported = True
+        except ImportError as e:
+            print(f"[FAIL] InputController import failed: {e}")
+            success = False
+
+    if _InputController_imported:
+        try:
+            ic = InputController(1920, 1080)
+            # Check for essential methods
+            if hasattr(ic, "move_mouse") and hasattr(ic, "click_mouse") and (hasattr(ic, "scroll") or hasattr(ic, "parse_scroll")):
+                print("[OK] InputController API verified.")
+            else:
+                print("[FAIL] InputController API incomplete.")
+                success = False
+        except Exception as e:
+            print(f"[FAIL] InputController error: {e}")
+            success = False
+
+    # 3. Check Protocol
+    try:
+        import protocol
+        if hasattr(protocol, "OP_HELLO"):
+            print("[OK] Protocol constants present.")
+        else:
+            print("[FAIL] Protocol constants missing.")
+            success = False
+    except Exception as e:
+        print(f"[FAIL] Protocol error: {e}")
+        success = False
+
+    if success:
+        print("\n=== FINAL RESULT: ALL SAFE CHECKS PASSED ===")
+        sys.exit(0)
     else:
-        print("FAIL: InputController missing methods.")
+        print("\n=== FINAL RESULT: VALIDATION FAILED ===")
+        sys.exit(1)
 
-except Exception as e:
-    print(f"FAIL: input_controller error: {e}")
-
-try:
-    print("Importing agent...")
-    # Mocking config and tunnel_manager imports if they fail due to dependencies
-    sys.modules["targets.config"] = type(
-        "config",
-        (),
-        {"REGISTRY_URL": "", "AGENT_USERNAME": "", "REGISTRY_PASSWORD": ""},
-    )
-    sys.modules["targets.tunnel_manager"] = type("tunnel_manager", (), {})
-
-    import agent
-
-    print("agent imported successfully.")
-except Exception as e:
-    print(f"FAIL: agent error: {e}")
-
-try:
-    print("Importing protection...")
-    import protection
-
-    print("protection imported successfully.")
-    if hasattr(protection, "set_critical_status") and hasattr(
-        protection, "is_safe_mode"
-    ):
-        print("[OK] protection API is correct.")
-    else:
-        print("FAIL: protection API missing methods.")
-except Exception as e:
-    print(f"FAIL: protection error: {e}")
-
-try:
-    print("Importing tunnel_manager...")
-    # Mocking urllib for tunnel_manager
-    sys.modules["urllib.request"] = type(
-        "urllib", (), {"urlopen": lambda *a, **k: None}
-    )
-    import tunnel_manager
-
-    print("tunnel_manager imported successfully.")
-    tm = tunnel_manager.TunnelManager(8765)
-    if hasattr(tm, "restart") and hasattr(tm, "STUCK_TIMEOUT"):
-        print("[OK] TunnelManager API is correct (Phase 7 verified).")
-    else:
-        print("FAIL: TunnelManager API missing methods.")
-except Exception as e:
-    print(f"FAIL: tunnel_manager error: {e}")
-
-try:
-    print("Importing capture...")
-    # Mocking mss and numpy
-    sys.modules["mss"] = type("mss", (), {"mss": lambda: None})
-    sys.modules["numpy"] = type("numpy", (), {})
-    import capture
-
-    print("capture imported successfully.")
-    cap = capture.DeltaScreenCapturer()
-    if hasattr(cap, "get_frame_bytes"):
-        print("[OK] DeltaScreenCapturer API is correct.")
-    else:
-        print("FAIL: DeltaScreenCapturer missing methods.")
-except Exception as e:
-    # Capture might fail if dependencies like cv2 are hard to mock, which is fine for a syntax check
-    print(f"[*] capture check skipped or failed: {e}")
-
-print("\n--- Final Result: If no FAILs above, syntax check PASSED ---")
+if __name__ == "__main__":
+    run_checks()

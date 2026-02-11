@@ -50,20 +50,21 @@ echo [*] Removed .spec files.
 
 :: Clean dist folder
 if exist dist (
-    rmdir /s /q dist
-    if %errorlevel% neq 0 (
+    rmdir /s /q dist || (
         echo [!] Failed to remove dist folder! Build Aborted.
         exit /b 1
     )
-    mkdir dist
+    mkdir dist || (
+        echo [!] Failed to create dist folder after cleanup! Build Aborted.
+        exit /b 1
+    )
     echo [*] Cleaned up dist folder.
 ) else (
-    mkdir dist
+    mkdir dist || (
+        echo [!] Failed to create dist folder! Build Aborted.
+        exit /b 1
+    )
     echo [*] Created dist folder.
-)
-if %errorlevel% neq 0 (
-    echo [!] Failed to clean up dist folder! Build Aborted.
-    exit /b 1
 )
 :: 2. Build AGENT (Copied from build_all.bat)
 echo [*] Building 1/3: MyDeskAgent.exe...
@@ -139,11 +140,9 @@ if /i "%BUILD_FULL%"=="true" (
         --hidden-import targets.protection ^
         --hidden-import pywintypes ^
         --hidden-import win32api ^
-        targets/services/watcher.py
-
-    if %errorlevel% neq 0 (
+        targets/services/watcher.py || (
         echo [!] Service Shield Build Failed!
-        exit /b %errorlevel%
+        exit /b 1
     )
     :: 5. Build Setup Bundle
     echo.
