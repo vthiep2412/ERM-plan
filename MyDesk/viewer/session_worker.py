@@ -6,6 +6,7 @@ import threading
 import json
 from PyQt6.QtCore import QObject, pyqtSignal
 import struct
+import socket
 
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 from core import protocol
@@ -41,6 +42,7 @@ class AsyncSessionWorker(QObject):
 
     # WebRTC signals (Project Supersonic)
     webrtc_frame_received = pyqtSignal(object)  # numpy array from WebRTC video track
+    connection_failed_dialog_request = pyqtSignal(str, str) # title, message
 
     def __init__(self, target_url, target_id=None):
         super().__init__()
@@ -164,7 +166,17 @@ class AsyncSessionWorker(QObject):
                 self.connection_lost.emit()
 
         except Exception as e:
-            print(f"Session Error: {e}")
+            error_message = f"Session Error: {e}"
+            print(f"[-] {error_message}")
+            if isinstance(e, socket.gaierror) and e.errno == 11001: # 11001 is WSANO_DATA (getaddrinfo failed)
+                self.connection_progress.emit(0, "❌ Agent URL Unresolvable. Check network/DNS.")
+                self.connection_failed_dialog_request.emit("Connection Error", "The agent URL is unresolvable. Please check the URL, your network connection, and DNS settings.")
+            elif isinstance(e, ConnectionRefusedError) or "Connection refused" in str(e): # For websockets.exceptions.WebSocketConnectionClosed for connection refused and direct ConnectionRefusedError
+                self.connection_progress.emit(0, "❌ Agent Offline or Connection Refused.")
+                self.connection_failed_dialog_request.emit("Connection Error", "The agent is offline or refused the connection. Please ensure the agent is running and accessible.")
+            else:
+                self.connection_progress.emit(0, f"❌ Connection failed: {str(e)}")
+                self.connection_failed_dialog_request.emit("Connection Error", f"Failed to connect to agent: {str(e)}")
         finally:
             with self._lock:
                 self.ws = None

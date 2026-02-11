@@ -26,12 +26,12 @@ def test_module(name):
         # For auditor and others that might use relative imports, 
         # we try to import them through the targets package if possible
         if name in ["auditor", "capture", "webrtc_tracks", "webrtc_handler"]:
-             try:
-                 __import__(f"targets.{name}")
-             except ImportError:
-                 __import__(name)
+            try:
+                __import__(f"targets.{name}")
+            except ImportError:
+                __import__(name)
         else:
-             __import__(name)
+            __import__(name)
         print("IMPORTED")
         return True
     except Exception as e:

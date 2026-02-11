@@ -241,6 +241,10 @@ class SessionWindow(QMainWindow):
         self.worker.clipboard_entry.connect(self.clipboard_tab.add_entry)
         self.worker.sysinfo_data.connect(self.device_settings_tab.update_sysinfo)
 
+        # Connect the new connection failed signal
+        self.worker.connection_failed_dialog_request.connect(self._on_connection_failed_dialog_request)
+
+
         # Clipboard tab outgoing signals
         self.clipboard_tab.get_history_signal.connect(
             lambda: self.worker.send_msg(bytes([protocol.OP_CLIP_HISTORY_REQ]))
@@ -758,6 +762,10 @@ class SessionWindow(QMainWindow):
             QMessageBox.warning(
                 self, "Microphone Error", f"Remote microphone failed:\n{error_msg}"
             )
+
+    def _on_connection_failed_dialog_request(self, title, message):
+        """Slot to display a QMessageBox on the GUI thread."""
+        QMessageBox.critical(self, title, message)
 
     def on_disconnect(self):
         if self.closing:

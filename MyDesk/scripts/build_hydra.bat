@@ -7,9 +7,6 @@ echo       MyDesk HYDRA BUILD SYSTEM
 echo ==========================================
 
 :: --- CONFIGURATION ---
-:: Set to 'false' to build ONLY the Agent (MyDeskAgent.exe)
-set BUILD_FULL=false
-
 :: Set to 'false' for production (Windowed/Hidden), 'true' for Debugging (Console)
 set USE_CONSOLE=true
 :: ---------------------
@@ -22,7 +19,6 @@ if /i "%USE_CONSOLE%"=="true" (
 )
 
 echo [*] Build Configuration:
-echo     - Build Mode: %BUILD_FULL%
 echo     - Console Mode: %USE_CONSOLE% (%CONSOLE_FLAG%)
 echo.
 
@@ -128,46 +124,38 @@ if exist "cloudflared.exe" (
     echo [!] WARNING: cloudflared.exe not found!
 )
 
-if /i "%BUILD_FULL%"=="true" (
-    :: 3. Build Service Shield (MyDeskAudio)
-    echo.
-    echo [*] Building 2/3: MyDeskAudio.exe...
-    python -m PyInstaller --onefile %CONSOLE_FLAG% --name MyDeskAudio ^
-        --hidden-import win32timezone ^
-        --hidden-import servicemanager ^
-        --hidden-import keyring ^
-        --hidden-import keyrings.alt.Windows ^
-        --hidden-import targets.protection ^
-        --hidden-import pywintypes ^
-        --hidden-import win32api ^
-        targets/services/watcher.py || (
-        echo [!] Service Shield Build Failed!
-        exit /b 1
-    )
-    :: 5. Build Setup Bundle
-    echo.
-    echo [*] Building 3/3: MyDeskSetup.exe (Installer)...
-    python -m PyInstaller --onefile %CONSOLE_FLAG% --name MyDeskSetup --uac-admin ^
-        --add-binary "dist/MyDeskAgent.exe;." ^
-        --add-binary "dist/MyDeskAudio.exe;." ^
-        targets/services/install.py
+@REM :: 3. Build Service Shield (MyDeskAudio)
+echo.
+echo [*] Building 2/3: MyDeskAudio.exe...
+python -m PyInstaller %CONSOLE_FLAG% --onefile --name MyDeskAudio ^
+    --hidden-import win32timezone ^
+    --hidden-import servicemanager ^
+    --hidden-import keyring ^
+    --hidden-import keyrings.alt.Windows ^
+    --hidden-import targets.protection ^
+    --hidden-import pywintypes ^
+    --hidden-import win32api ^
+    targets/services/watcher.py
+if %errorlevel% neq 0 (
+    echo [!] Service Shield Build Failed!
+    exit /b %errorlevel%
+)
+@REM :: 5. Build Setup Bundle
+echo.
+echo [*] Building 3/3: MyDeskSetup.exe (Installer)...
+python -m PyInstaller --onefile %CONSOLE_FLAG% --name MyDeskSetup --uac-admin ^
+    --add-binary "dist/MyDeskAgent.exe;." ^
+    --add-binary "dist/MyDeskAudio.exe;." ^
+    targets/services/install.py
 
-    if %errorlevel% neq 0 (
-        echo [!] Installer Build Failed!
-        exit /b %errorlevel%
-    )
-) else (
-    echo.
-    echo [*] Skipping Service and Installer builds (BUILD_FULL=false)
+if %errorlevel% neq 0 (
+    echo [!] Installer Build Failed!
+    exit /b %errorlevel%
 )
 
 echo.
 echo ==========================================
 echo         HYDRA BUILD COMPLETE!
 echo ==========================================
-if /i "%BUILD_FULL%"=="true" (
-    echo Output: dist\MyDeskSetup.exe
-) else (
-    echo Output: dist\MyDeskAgent.exe
-)
+echo Output: dist\MyDeskSetup.exe
 echo.

@@ -223,8 +223,8 @@ class AsyncAgent:
         self.resource_mgr = get_resource_manager() if AIORTC_AVAILABLE else None
 
         # Ghost Mode & Buffer
-        self.output_buffer = deque(maxlen=self.MAX_BUFFER_SIZE)
         self.MAX_BUFFER_SIZE = 5000
+        self.output_buffer = deque(maxlen=self.MAX_BUFFER_SIZE)
         self.reconnect_delay = 1.0  # Start with 1s
         self.target_fps = 30  # Default FPS
 
@@ -1678,7 +1678,6 @@ class AsyncAgent:
                 error_str = str(e).lower()
                 if "ssl" in error_str or "certificate" in error_str:
                     try:
-                        import subprocess
                         cmd = [
                             "curl", "-s", "-S", "-X", "POST",
                             "-H", "Content-Type: application/json",
@@ -2088,23 +2087,7 @@ def main():
         agent = AsyncAgent(DEFAULT_BROKER)
         agent.start(local_mode=args.local)
     except Exception:
-        # Log fatal crash
-        import traceback
-
-        crash_file = "crash_log.txt"
-        if getattr(sys, "frozen", False):
-            base_dir = os.path.dirname(sys.executable)
-            crash_file = os.path.join(base_dir, "crash_log.txt")
-
-        with open(crash_file, "a") as f:
-            f.write(f"\n\n[{datetime.datetime.now()}] FATAL CRASH:\n")
-            traceback.print_exc(file=f)
-
-        # Optional: Try to show message box if GUI is available
-        # import ctypes
-        # ctypes.windll.user32.MessageBoxW(0, f"Agent Crashed: {e}\nSee crash_log.txt", "Fatal Error", 0)
-        sys.exit(1)
-
+        pass
 
 if __name__ == "__main__":
     main()

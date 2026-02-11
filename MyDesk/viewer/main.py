@@ -370,7 +370,11 @@ class ClientManager(QMainWindow):
         self.status_bar.setText(err_msg)
         if "Access Denied" in err_msg:
             QMessageBox.warning(self, "Auth Error", err_msg)
+        elif "getaddrinfo failed" in err_msg or "Name or service not known" in err_msg: # Common getaddrinfo errors
+            QMessageBox.critical(self, "Network Error", "The main control server is unresolvable. Please check your network connection and DNS settings.")
+            print(f"[-] Registry Network Error: {err_msg}")
         else:
+            QMessageBox.warning(self, "Registry Error", f"Failed to refresh agents: {err_msg}")
             print(f"[-] Registry Error: {err_msg}")
 
     def populate_grid(self, agents):
