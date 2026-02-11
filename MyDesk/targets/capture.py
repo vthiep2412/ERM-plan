@@ -55,9 +55,10 @@ ALLOWED_FORMATS = {"JPEG", "WEBP", "PNG", "JXL"}
 
 
 class DeltaScreenCapturer:
-    def __init__(self, quality=50, scale=0.9, format="WEBP"):
+    def __init__(self, quality=50, scale=1.0, format="WEBP", method="MSS"):
         self.quality = quality
         self.scale = scale
+        self.method = method # Currently MSS is primary, but we accept the param
 
         # Validate format
         format_upper = format.upper()
@@ -105,9 +106,10 @@ class DeltaScreenCapturer:
 
     def __del__(self):
         """Ensure MSS resources are released"""
-        if self.sct:
+        sct = getattr(self, "sct", None)
+        if sct:
             try:
-                self.sct.close()
+                sct.close()
             except:
                 pass
 
@@ -281,7 +283,7 @@ class DeltaScreenCapturer:
 
                 # ImageGrab.grab() captures primary or virtual screen
                 # usually (0,0) for main
-                pil_img = ImageGrab.grab()
+                pil_img = ImageGrab.grab().convert("RGB")
                 img = np.array(pil_img)
                 self.monitor_left = 0
                 self.monitor_top = 0
@@ -291,6 +293,9 @@ class DeltaScreenCapturer:
         # Draw Cursor
         if img is not None:
             img = self._draw_cursor(img)
+            # Ensure C-contiguous for WebRTC/av compatibility
+            if not img.flags["C_CONTIGUOUS"]:
+                img = np.ascontiguousarray(img)
 
         return img
 

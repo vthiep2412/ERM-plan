@@ -35,13 +35,20 @@ class ScreenShareTrack(VideoStreamTrack):
 
     def __init__(self, capturer, resource_manager=None):
         super().__init__()
-        self.capturer = capturer
+        self._capturer = capturer # Can be a direct object or an object with a .capturer attr
         self.resource_manager = resource_manager
 
         # Frame timing
         self._start_time = None
         self._frame_count = 0
         self._target_fps = 30
+
+    @property
+    def capturer(self):
+        # Support dynamic reference if we passed the Agent itself
+        if hasattr(self._capturer, "capturer"):
+            return self._capturer.capturer
+        return self._capturer
 
     async def recv(self):
         """
@@ -64,7 +71,28 @@ class ScreenShareTrack(VideoStreamTrack):
 
         frame_duration = 1.0 / self._target_fps
 
-        # Wait for frame timing
+        # Capture frame immediately to reduce input-to-display latency
+        try:
+            raw_frame = self._capture_frame()
+            if raw_frame is None:
+                # Return a blank frame if capture fails
+                if not hasattr(self, "_black_frame") or self._black_frame is None:
+                    self._black_frame = np.zeros((720, 1280, 3), dtype=np.uint8)
+                raw_frame = self._black_frame
+            else:
+                # Store size for fallback
+                if not hasattr(self, "_last_size") or self._last_size != raw_frame.shape[:2]:
+                    self._last_size = raw_frame.shape[:2]
+                    self._black_frame = np.zeros((self._last_size[0], self._last_size[1], 3), dtype=np.uint8)
+
+        except Exception as e:
+            print(f"[ScreenTrack] Capture error: {e}")
+            if hasattr(self, "_black_frame") and self._black_frame is not None:
+                raw_frame = self._black_frame
+            else:
+                raw_frame = np.zeros((720, 1280, 3), dtype=np.uint8)
+
+        # Timing: wait until the frame interval is actually reached
         target_time = self._start_time + (self._frame_count * frame_duration)
         now = time.time()
         if target_time > now:
@@ -72,22 +100,20 @@ class ScreenShareTrack(VideoStreamTrack):
 
         self._frame_count += 1
 
-        # Capture frame
-        try:
-            raw_frame = self._capture_frame()
-            if raw_frame is None:
-                # Return a blank frame if capture fails
-                raw_frame = np.zeros((480, 640, 3), dtype=np.uint8)
-        except Exception as e:
-            print(f"[ScreenTrack] Capture error: {e}")
-            raw_frame = np.zeros((480, 640, 3), dtype=np.uint8)
-
         # Convert numpy array to av.VideoFrame
-        video_frame = av.VideoFrame.from_ndarray(raw_frame, format="rgb24")
-        video_frame.pts = self._frame_count
-        video_frame.time_base = fractions.Fraction(1, self._target_fps)
-
-        return video_frame
+        try:
+            video_frame = av.VideoFrame.from_ndarray(raw_frame, format="rgb24")
+            video_frame.pts = self._frame_count
+            video_frame.time_base = fractions.Fraction(1, self._target_fps)
+            return video_frame
+        except Exception as e:
+            print(f"[ScreenTrack] av.VideoFrame error: {e}")
+            # Final fallback
+            black = np.zeros((480, 640, 3), dtype=np.uint8)
+            video_frame = av.VideoFrame.from_ndarray(black, format="rgb24")
+            video_frame.pts = self._frame_count
+            video_frame.time_base = fractions.Fraction(1, self._target_fps)
+            return video_frame
 
     def _capture_frame(self) -> np.ndarray:
         """Get raw numpy frame from capturer"""

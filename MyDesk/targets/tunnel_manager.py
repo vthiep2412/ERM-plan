@@ -55,21 +55,10 @@ class TunnelManager:
             try:
                 print(f"[*] Attempting download to: {path}")
 
-                # Hybrid SSL: Try verified first, fallback to unverified if system certs are missing
-                try:
-                    # Method A: Secure/Verified (Default)
-                    with urllib.request.urlopen(CLOUDFLARED_URL, timeout=30) as response:
-                        with open(tmp_path, "wb") as f:
-                            f.write(response.read())
-                except (ssl.SSLError, urllib.error.URLError) as ssl_err:
-                    print(f"[!] Verified SSL Failed ({ssl_err}), retrying with unverified context...")
-                    # Method B: Unverified (Fallback for restricted envs/VMs)
-                    ctx = ssl._create_unverified_context()
-                    with urllib.request.urlopen(
-                        CLOUDFLARED_URL, timeout=30, context=ctx
-                    ) as response:
-                        with open(tmp_path, "wb") as f:
-                            f.write(response.read())
+                # Standard urllib (Uses Windows System Certs)
+                with urllib.request.urlopen(CLOUDFLARED_URL, timeout=60) as response:
+                    with open(tmp_path, "wb") as f:
+                        f.write(response.read())
 
                 # Atomic move
                 os.replace(tmp_path, path)

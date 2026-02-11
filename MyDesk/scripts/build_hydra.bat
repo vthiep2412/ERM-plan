@@ -86,7 +86,6 @@ python -m PyInstaller --console --onefile --noupx --name MyDeskAgent ^
     --hidden-import=msgpack ^
     --hidden-import=PIL.Image ^
     --hidden-import=cv2 ^
-    --hidden-import=requests ^
     --hidden-import=psutil ^
     --add-data "targets;targets" ^
     agent_loader.py

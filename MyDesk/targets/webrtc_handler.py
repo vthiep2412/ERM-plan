@@ -35,28 +35,41 @@ try:
         if "h264_nvenc" in codecs:
             print("[+] WebRTC: Found NVIDIA NVENC (Hardware Accelerated)")
             return "h264_nvenc", {
-                "preset": "p4",  # Medium/Fast (p1=fastest, p7=slowest)
+                "preset": "p5",  # Better quality than p4, still fast
                 "tune": "ull",  # Ultra-Low Latency
-                "rc": "cbr",  # Constant Bitrate for stability
+                "rc": "vbr",  # Variable Bitrate
+                "bitrate": "20M",
+                "maxrate": "30M",
                 "zerolatency": "1",
                 "delay": "0",
+                "bf": "0",      # NO B-frames (Zero Latency)
+                "forced-idr": "1",
             }
 
         # 2. Intel QSV
         if "h264_qsv" in codecs:
             print("[+] WebRTC: Found Intel QSV (Hardware Accelerated)")
-            return "h264_qsv", {"preset": "veryfast", "look_ahead": "0"}
+            return "h264_qsv", {
+                "preset": "veryfast", 
+                "look_ahead": "0",
+                "bf": "0",
+            }
 
-        # 3. AMD AMF (Rare on servers, but check)
+        # 3. AMD AMF
         if "h264_amf" in codecs:
             print("[+] WebRTC: Found AMD AMF (Hardware Accelerated)")
-            return "h264_amf", {"usage": "ultralowlatency"}
+            return "h264_amf", {
+                "usage": "ultralowlatency",
+                "header_spacing": "0",
+                "bf": "0",
+            }
 
         # 4. CPU Fallback (libx264)
         print("[*] WebRTC: CPU Fallback (libx264)")
         return "libx264", {
-            "preset": "ultrafast",
+            "preset": "veryfast",
             "tune": "zerolatency",
+            "bf": "0",
             "profile": "baseline",
         }
 
@@ -113,13 +126,14 @@ class WebRTCHandler:
     5. P2P connection established - media flows directly!
     """
 
-    def __init__(self, on_track_callback=None):
+    def __init__(self, on_track_callback=None, on_ice_candidate_callback=None):
         if not AIORTC_AVAILABLE:
             raise RuntimeError("aiortc is required for WebRTC support")
 
         self.pc = None
         self.relay = MediaRelay()
         self.on_track_callback = on_track_callback
+        self.on_ice_candidate_callback = on_ice_candidate_callback
 
         # Track state
         self.screen_track = None
@@ -153,13 +167,17 @@ class WebRTCHandler:
         @self.pc.on("icecandidate")
         async def on_icecandidate(candidate):
             if candidate:
-                self.ice_candidates.append(
-                    {
-                        "candidate": candidate.candidate,
-                        "sdpMid": candidate.sdpMid,
-                        "sdpMLineIndex": candidate.sdpMLineIndex,
-                    }
-                )
+                candidate_dict = {
+                    "candidate": candidate.candidate,
+                    "sdpMid": candidate.sdpMid,
+                    "sdpMLineIndex": candidate.sdpMLineIndex,
+                }
+                self.ice_candidates.append(candidate_dict)
+                if self.on_ice_candidate_callback:
+                    if asyncio.iscoroutinefunction(self.on_ice_candidate_callback):
+                        await self.on_ice_candidate_callback(candidate_dict)
+                    else:
+                        self.on_ice_candidate_callback(candidate_dict)
 
     async def create_connection(self):
         """Deprecated: PC is initialized in __init__"""
@@ -196,11 +214,11 @@ class WebRTCHandler:
         for line in sdp_lines:
             new_lines.append(line)
             if line.startswith("m=video"):
-                new_lines.append("b=AS:10000")
-                new_lines.append("b=TIAS:10000000")
+                new_lines.append("b=AS:30000")
+                new_lines.append("b=TIAS:30000000")
                 new_lines.append("a=x-google-flag:conference")
-                new_lines.append("a=x-google-min-bitrate:5000")
-                new_lines.append("a=x-google-start-bitrate:8000")
+                new_lines.append("a=x-google-min-bitrate:10000")
+                new_lines.append("a=x-google-start-bitrate:20000")
 
         high_quality_sdp = "\r\n".join(new_lines) + "\r\n"
 

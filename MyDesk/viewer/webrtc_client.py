@@ -124,11 +124,13 @@ class WebRTCClient(QObject if PYQT_AVAILABLE else object):
         for line in sdp_lines:
             new_lines.append(line)
             if line.startswith("m=video"):
-                new_lines.append("b=AS:10000")  # 10 Mbps
+                new_lines.append("b=AS:30000")  # 30 Mbps
                 new_lines.append(
-                    "b=TIAS:10000000"
-                )  # 10 Mbps (Transport Independent Application Specific)
-                new_lines.append("a=x-google-flag:conference")  # Hint for high quality
+                    "b=TIAS:30000000"
+                )  # 30 Mbps
+                new_lines.append("a=x-google-flag:conference")
+                new_lines.append("a=x-google-min-bitrate:10000")
+                new_lines.append("a=x-google-start-bitrate:20000")
 
         offer_with_high_bitrate = "\r\n".join(new_lines) + "\r\n"
 

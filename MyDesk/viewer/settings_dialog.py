@@ -55,8 +55,9 @@ class SettingsDialog(QDialog):
 
         self.settings = current_settings or {
             "method": "MSS",
-            "quality": 50,
-            "scale": 90,
+            "quality": 70,
+            "scale": 100,
+            "fps": 30,
             "format": "JPEG",
             "safety_mode": True,
         }
@@ -76,13 +77,27 @@ class SettingsDialog(QDialog):
         method_layout.addWidget(self.method_combo)
         layout.addWidget(method_group)
 
+        # FPS Slider
+        fps_group = QGroupBox("Target FPS (WebRTC)")
+        fps_layout = QVBoxLayout(fps_group)
+        self.fps_label = QLabel(f"{self.settings.get('fps', 30)} FPS")
+        self.fps_slider = QSlider(Qt.Orientation.Horizontal)
+        self.fps_slider.setRange(1, 60)
+        self.fps_slider.setValue(self.settings.get("fps", 30))
+        self.fps_slider.valueChanged.connect(
+            lambda v: self.fps_label.setText(f"{v} FPS")
+        )
+        fps_layout.addWidget(self.fps_slider)
+        fps_layout.addWidget(self.fps_label)
+        layout.addWidget(fps_group)
+
         # Quality Slider
-        quality_group = QGroupBox("Quality")
+        quality_group = QGroupBox("Quality / Bitrate")
         quality_layout = QVBoxLayout(quality_group)
-        self.quality_label = QLabel(f"{self.settings.get('quality', 50)}%")
+        self.quality_label = QLabel(f"{self.settings.get('quality', 70)}%")
         self.quality_slider = QSlider(Qt.Orientation.Horizontal)
         self.quality_slider.setRange(10, 100)
-        self.quality_slider.setValue(self.settings.get("quality", 50))
+        self.quality_slider.setValue(self.settings.get("quality", 70))
         self.quality_slider.valueChanged.connect(
             lambda v: self.quality_label.setText(f"{v}%")
         )
@@ -93,10 +108,10 @@ class SettingsDialog(QDialog):
         # Scale Slider
         scale_group = QGroupBox("Resolution Scale")
         scale_layout = QVBoxLayout(scale_group)
-        self.scale_label = QLabel(f"{self.settings.get('scale', 90)}%")
+        self.scale_label = QLabel(f"{self.settings.get('scale', 100)}%")
         self.scale_slider = QSlider(Qt.Orientation.Horizontal)
-        self.scale_slider.setRange(50, 100)
-        self.scale_slider.setValue(self.settings.get("scale", 90))
+        self.scale_slider.setRange(25, 100)
+        self.scale_slider.setValue(self.settings.get("scale", 100))
         self.scale_slider.valueChanged.connect(
             lambda v: self.scale_label.setText(f"{v}%")
         )
@@ -105,7 +120,7 @@ class SettingsDialog(QDialog):
         layout.addWidget(scale_group)
 
         # Format
-        format_group = QGroupBox("Compression Format")
+        format_group = QGroupBox("Compression Format (Legacy)")
         format_layout = QVBoxLayout(format_group)
         self.format_combo = QComboBox()
         self.format_combo.addItems(["JPEG", "WebP"])
@@ -145,6 +160,7 @@ class SettingsDialog(QDialog):
     def save_settings(self):
         self.settings = {
             "method": self.method_combo.currentText(),
+            "fps": self.fps_slider.value(),
             "quality": self.quality_slider.value(),
             "scale": self.scale_slider.value(),
             "format": self.format_combo.currentText(),

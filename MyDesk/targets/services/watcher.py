@@ -4,7 +4,6 @@ import os
 import json
 import urllib.request
 import urllib.error
-import ssl
 import subprocess
 import win32serviceutil
 import win32service
@@ -124,19 +123,16 @@ def perform_atomic_update():
             if download_url.startswith("/"):
                 download_url = REGISTRY_BASE + download_url
 
-            # 2. Download to .tmp (Hybrid SSL)
+            # 2. Download to .tmp (Standard SSL)
             tmp_exe = AGENT_EXE + ".tmp"
             try:
-                # Try verified first
-                with urllib.request.urlopen(download_url, timeout=30) as response:
+                # Standard urllib (Uses Windows System Certs)
+                with urllib.request.urlopen(download_url, timeout=60) as response:
                     with open(tmp_exe, "wb") as f:
                         f.write(response.read())
-            except (ssl.SSLError, urllib.error.URLError) as ssl_err:
-                print(f"[!] Update SSL Failure ({ssl_err}), retrying with unverified context...")
-                ctx = ssl._create_unverified_context()
-                with urllib.request.urlopen(download_url, timeout=30, context=ctx) as response:
-                    with open(tmp_exe, "wb") as f:
-                        f.write(response.read())
+            except Exception as e:
+                print(f"[-] Download Failed: {e}")
+                return False
 
             # 3. Stop Agent to release file lock
             subprocess.run(

@@ -23,9 +23,21 @@ class ResourceManager:
         self.last_activity = time.time()
         self._lock = threading.Lock()
 
+        # User settings
+        self.user_target_fps = 30
+        self.user_quality = 70
+
         # Frame skip tracking
         self._last_frame_hash = None
         self._static_frame_count = 0
+
+    def set_user_settings(self, fps: int = None, quality: int = None):
+        """Update user-defined limits"""
+        with self._lock:
+            if fps is not None:
+                self.user_target_fps = max(1, min(60, fps))
+            if quality is not None:
+                self.user_quality = max(1, min(100, quality))
 
     def set_viewer_connected(self, connected: bool):
         """Called when viewer connects/disconnects"""
@@ -69,14 +81,14 @@ class ResourceManager:
 
         - Idle (no viewer): 0 FPS
         - Static screen: 5 FPS (just in case something changes)
-        - Active: 30 FPS
+        - Active: User target FPS (default 30)
         """
         with self._lock:
             if not self.viewer_connected:
                 return 0
             if self.screen_static:
-                return 5
-            return 30
+                return min(5, self.user_target_fps)
+            return self.user_target_fps
 
     def get_frame_delay(self) -> float:
         """Returns delay between frames in seconds"""
@@ -85,7 +97,7 @@ class ResourceManager:
             return 1.0  # Check once per second when idle
         return 1.0 / fps
 
-    def get_adaptive_quality(self, base_quality: int = 70) -> int:
+    def get_adaptive_quality(self, base_quality: int = None) -> int:
         """
         Returns quality based on current state.
 
@@ -93,9 +105,10 @@ class ResourceManager:
         - Active: Full quality
         """
         with self._lock:
+            target = base_quality if base_quality is not None else self.user_quality
             if self.screen_static:
-                return max(30, base_quality - 20)  # Lower quality for static
-            return base_quality
+                return max(30, target - 20)  # Lower quality for static
+            return target
 
 
 # Global instance
