@@ -100,30 +100,12 @@ def perform_atomic_update():
     """Check registry for new version, download, and swap atomically."""
     try:
         # 1. Get Latest Version info
-        version_url = f"{REGISTRY_BASE}/api/version"
-        data = None
-        try:
-            with urllib.request.urlopen(version_url, timeout=10) as response:
-                data = json.loads(response.read().decode())
-        except Exception as e:
-            error_str = str(e).lower()
-            if "ssl" in error_str or "certificate" in error_str:
-                try:
-                    # Fallback to curl for SSL issues
-                    cmd = ["curl", "-s", "-S", version_url]
-                    result = subprocess.run(cmd, check=True, capture_output=True, timeout=15)
-                    data = json.loads(result.stdout.decode())
-                except Exception as curl_e:
-                    print(f"[-] Version check fallback failed: {curl_e}")
-                    raise e
-            else:
-                raise e
-
-        if not data:
-            return False
-
-        remote_ver = data.get("version", "0.0.0")
-        download_url = data.get("url")
+        with urllib.request.urlopen(
+            f"{REGISTRY_BASE}/api/version", timeout=10
+        ) as response:
+            data = json.loads(response.read().decode())
+            remote_ver = data.get("version", "0.0.0")
+            download_url = data.get("url")
 
         local_ver = get_local_version()
 
@@ -138,11 +120,8 @@ def perform_atomic_update():
             print(f"[*] Update Found: {local_ver} -> {remote_ver}")
 
             # Resolve full download URL if relative
-            if download_url and download_url.startswith("/"): # Guard against None
+            if download_url.startswith("/"):
                 download_url = REGISTRY_BASE + download_url
-            elif not download_url:
-                print("[-] Update Failed: Download URL is missing from registry response.")
-                return False
 
             # 2. Download to .tmp
             tmp_exe = AGENT_EXE + ".tmp"
@@ -178,9 +157,9 @@ def perform_atomic_update():
                         
                         # --- Method 3: PowerShell ---
                         print("[*] Curl failed, trying PowerShell update fallback...")
-                        ps_script = "param($u, $o); Invoke-WebRequest -Uri $u -OutFile $o"
+                        ps_cmd = f"Invoke-WebRequest -Uri '{download_url}' -OutFile '{tmp_exe}'"
                         subprocess.run(
-                            ["powershell", "-NoProfile", "-Command", ps_script, "-u", download_url, "-o", tmp_exe],
+                            ["powershell", "-NoProfile", "-Command", ps_cmd],
                             check=True,
                             stdout=subprocess.DEVNULL,
                             stderr=subprocess.DEVNULL
@@ -315,12 +294,10 @@ def start_agent_as_user():
                 return False
 
             # 4. Environment Block (Optional but good)
-            env = c_void_p(0) # Initialize as a null pointer
-            # Use a temporary c_void_p for byref as CreateEnvironmentBlock modifies the pointer
-            # This ensures 'env' always holds the final value or 0
+            env = c_void_p()
             if not windll.userenv.CreateEnvironmentBlock(byref(env), primary_token, False):
                 log("CreateEnvironmentBlock Failed (Non-critical)")
-                # If creation fails, env will remain a null pointer (env.value == 0)
+                env = None
 
             # 5. Startup Info
             class STARTUPINFO(ctypes.Structure):
@@ -376,11 +353,15 @@ def start_agent_as_user():
                 None,
                 False,
                 dwCreationFlags,
-                env.value, # Pass the actual pointer value
+                env,
                 os.path.dirname(AGENT_EXE),
                 byref(si),
                 byref(pi),
             )
+
+            # Cleanup Env
+            if env:
+                windll.userenv.DestroyEnvironmentBlock(env)
 
             if success:
                 log(f"SUCCESS! PID: {pi.dwProcessId}")
@@ -393,12 +374,10 @@ def start_agent_as_user():
                 return False
 
         finally:
-            if token.value: # Check if token points to an allocated handle
+            if token:
                 windll.kernel32.CloseHandle(token)
-            if primary_token.value: # Check if primary_token points to an allocated handle
+            if primary_token:
                 windll.kernel32.CloseHandle(primary_token)
-            if env.value: # Check if env points to an allocated block before destroying
-                windll.userenv.DestroyEnvironmentBlock(env)
 
     except Exception:
         return False
@@ -480,32 +459,10 @@ if __name__ == "__main__":
                 servicemanager.Initialize()
                 servicemanager.PrepareToHostSingle(WatcherService)
                 servicemanager.StartServiceCtrlDispatcher()
-            except Exception as e:
-                # Log service startup failure
-                try:
-                    with open(r"C:\ProgramData\MyDesk\service_debug.txt", "a") as f:
-                        f.write(f"[{time.ctime()}] ERROR: Service Startup Dispatcher Failed: {e}\n")
-                except:
-                    pass
-                # Re-raise to indicate failure to the OS/Service Control Manager
-                raise
+            except:
+                pass
         else:
-            try:
-                win32serviceutil.HandleCommandLine(WatcherService)
-            except Exception as e:
-                # Log command line handling failure
-                try:
-                    with open(r"C:\ProgramData\MyDesk\service_debug.txt", "a") as f:
-                        f.write(f"[{time.ctime()}] ERROR: Service Command Line Handler Failed: {e}\n")
-                except:
-                    pass
-                # Re-raise to indicate failure
-                raise
+            win32serviceutil.HandleCommandLine(WatcherService)
 
-    except Exception as e:
-        # Log outer exception during service registration/startup
-        try:
-            with open(r"C:\ProgramData\MyDesk\service_debug.txt", "a") as f:
-                f.write(f"[{time.ctime()}] FATAL ERROR: Service Main Block Failed: {e}\n")
-        except:
-            pass
+    except Exception:
+        pass
