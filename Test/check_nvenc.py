@@ -15,4 +15,4 @@ try:
     print("\nSUCCESS: h264_nvenc is available!")
 except Exception as e:
     print(f"\nFAIL: h264_nvenc not available: {e}")
-# alr
+

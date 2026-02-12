@@ -35,6 +35,7 @@ class AsyncSessionWorker(QObject):
 
     fm_data = pyqtSignal(list, str)  # Files, path
     fm_chunk = pyqtSignal(bytes)  # File download chunk
+    fm_download_info = pyqtSignal(dict)  # {"size": N, "name": "filename"}
     clipboard_data = pyqtSignal(str)
     clipboard_history = pyqtSignal(list)  # Clipboard history list
     clipboard_entry = pyqtSignal(dict)  # New real-time clipboard entry
@@ -52,6 +53,11 @@ class AsyncSessionWorker(QObject):
         self.loop = None
         self.ws = None
         self._lock = threading.Lock()
+
+        # Bandwidth tracking (read/reset by UI timer each second)
+        self._bytes_received = 0
+        self._bytes_sent = 0
+        self._webrtc_frames = 0
 
         # WebRTC client (Project Supersonic)
         self.webrtc_client = None
@@ -87,6 +93,7 @@ class AsyncSessionWorker(QObject):
         """Send a message to the agent from UI thread."""
         with self._lock:
             if self.ws and self.loop and self.loop.is_running():
+                self._bytes_sent += len(data)
                 asyncio.run_coroutine_threadsafe(send_msg(self.ws, data), self.loop)
 
     def _run_loop(self):
@@ -225,6 +232,11 @@ class AsyncSessionWorker(QObject):
     def _on_webrtc_frame(self, frame):
         """Handle incoming WebRTC video frame (numpy array)"""
         try:
+            # Count frames for FPS display
+            self._webrtc_frames += 1
+            # Estimate compressed download (H.264 ~30:1 ratio, pkt_size unavailable)
+            if hasattr(frame, 'nbytes'):
+                self._bytes_received += frame.nbytes // 30
             # Emit to UI (same signal path as old frames)
             self.webrtc_frame_received.emit(frame)
         except Exception as e:
@@ -242,6 +254,9 @@ class AsyncSessionWorker(QObject):
 
             opcode = msg[0]
             payload = msg[1:]
+
+            # Track bandwidth
+            self._bytes_received += len(msg)
 
             if opcode == protocol.OP_IMG_FRAME:
                 self.frame_received.emit(payload)
@@ -298,6 +313,12 @@ class AsyncSessionWorker(QObject):
                     print(f"[!] Error parsing FM data: {e}")
             elif opcode == protocol.OP_FM_CHUNK:
                 self.fm_chunk.emit(payload)
+            elif opcode == protocol.OP_FM_DOWNLOAD_INFO:
+                try:
+                    data = json.loads(payload.decode("utf-8"))
+                    self.fm_download_info.emit(data)
+                except Exception as e:
+                    print(f"[!] Error parsing FM download info: {e}")
 
             # Clipboard responses
             elif opcode == protocol.OP_CLIP_DATA:
@@ -374,4 +395,4 @@ class AsyncSessionWorker(QObject):
                 break
 
 
-# alr
+

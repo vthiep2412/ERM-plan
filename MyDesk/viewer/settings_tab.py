@@ -259,4 +259,4 @@ class SettingsTab(QWidget):
         #     # self.wifi_check.setEnabled(self.wifi_available)
 
 
-# alr
+

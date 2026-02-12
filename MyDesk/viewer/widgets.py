@@ -1,4 +1,4 @@
-from PyQt6.QtWidgets import QLabel, QVBoxLayout, QPlainTextEdit, QFrame
+from PyQt6.QtWidgets import QLabel, QVBoxLayout, QPlainTextEdit, QFrame,  QSizePolicy
 from PyQt6.QtCore import Qt, pyqtSignal
 from PyQt6.QtGui import QPixmap
 
@@ -29,6 +29,10 @@ class VideoCanvas(QLabel):
         # Force standard cursor
         self.setCursor(Qt.CursorShape.ArrowCursor)
 
+        # Prevent overflow: canvas should shrink to fit, not expand to pixmap size
+        self.setMinimumSize(1, 1)
+        self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
+
         self.input_enabled = True  # Control input logic without disabling widget
 
         self.original_pixmap = None
@@ -48,7 +52,11 @@ class VideoCanvas(QLabel):
         """Loads frame data (supports keyframe and delta)"""
         if self.decoder:
             # Use delta decoder
-            pix = self.decoder.decode(data)
+            try:
+                pix = self.decoder.decode(data)
+            except Exception as e:
+                print(f"[-] Delta decode error: {e}")
+                return
         else:
             # Fallback to raw loading
             pix = QPixmap()
@@ -261,4 +269,4 @@ class KeyLogWidget(QFrame):
             self.drag_start_position = None
 
 
-# alr
+

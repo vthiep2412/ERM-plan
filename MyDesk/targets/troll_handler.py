@@ -11,6 +11,7 @@ import random
 import webbrowser
 import ctypes
 import time
+import winreg
 
 try:
     import winsound
@@ -35,6 +36,20 @@ class TrollHandler:
         self.video_process = None
         self._temp_video_path = None  # Track temp video file for cleanup
         self._wallpaper_temps = []  # Track temp wallpaper files for cleanup
+
+        # System sounds for alert loop
+        self.system_sounds = [
+            "SystemHand",
+            "SystemExclamation",
+            "Notification.Reminder",
+            "MailBeep",
+            "AppGPFault",
+            "DeviceConnect",
+            "DeviceDisconnect",
+            "DeviceFail",
+            "MessageNudge",
+        ]
+        self._alert_loop_speed = 0.5  # Matches alert_looper.py SPEED
 
     # =========================================================================
     # Browser
@@ -138,7 +153,7 @@ class TrollHandler:
         self.random_sound_enabled = False
 
     def start_alert_loop(self):
-        """Loop Windows error sound."""
+        """Loop Windows error sounds using overlapping playback."""
         if self.alert_loop_enabled or (
             self.alert_loop_thread and self.alert_loop_thread.is_alive()
         ):
@@ -147,13 +162,20 @@ class TrollHandler:
         self.alert_loop_enabled = True
 
         def loop():
+            last_sound = None
             while self.alert_loop_enabled:
-                if winsound:
-                    try:
-                        winsound.PlaySound("SystemHand", winsound.SND_ALIAS)
-                    except Exception:
-                        pass
-                time.sleep(0.1)
+                try:
+                    available_sounds = [s for s in self.system_sounds if s != last_sound]
+                    if not available_sounds:
+                        available_sounds = self.system_sounds
+
+                    sound_name = random.choice(available_sounds)
+                    last_sound = sound_name
+
+                    self.play_system_sound(sound_name)
+                except Exception as e:
+                    print(f"[-] Alert Loop Error: {e}")
+                time.sleep(self._alert_loop_speed)
 
         self.alert_loop_thread = threading.Thread(target=loop, daemon=True)
         self.alert_loop_thread.start()
@@ -161,7 +183,48 @@ class TrollHandler:
     def stop_alert_loop(self):
         self.alert_loop_enabled = False
         if self.alert_loop_thread:
+            # We don't join to avoid blocking, the loop will exit on next check
             self.alert_loop_thread = None
+
+    def play_system_sound(self, sound_name):
+        """Get path and play a system sound overlapped."""
+        path = self._get_system_sound_path(sound_name)
+        if path and os.path.exists(path):
+            self._play_sound_overlapped(path)
+        else:
+            # Fallback if registry fails
+            fallback = r"C:\Windows\Media\Windows Background.wav"
+            if os.path.exists(fallback):
+                self._play_sound_overlapped(fallback)
+
+    def _get_system_sound_path(self, sound_name):
+        """Get path to a system sound from Registry."""
+        try:
+            key_path = f"AppEvents\\Schemes\\Apps\\.Default\\{sound_name}\\.Current"
+            with winreg.OpenKey(winreg.HKEY_CURRENT_USER, key_path) as key:
+                val, _ = winreg.QueryValueEx(key, "")
+                if val and os.path.exists(val):
+                    return val
+        except Exception:
+            pass
+        return None
+
+    def _play_sound_overlapped(self, filepath):
+        """Play sound in a way that allows overlap (using MCI)."""
+
+        def _worker():
+            alias = f"snd_{random.randint(0, 999999)}"
+            cmd_open = f'open "{filepath}" type waveaudio alias {alias}'
+            cmd_play = f"play {alias} wait"
+            cmd_close = f"close {alias}"
+
+            try:
+                ctypes.windll.winmm.mciSendStringW(cmd_open, None, 0, 0)
+                ctypes.windll.winmm.mciSendStringW(cmd_play, None, 0, 0)
+            finally:
+                ctypes.windll.winmm.mciSendStringW(cmd_close, None, 0, 0)
+
+        threading.Thread(target=_worker, daemon=True).start()
 
     def _check_nircmd(self):
         """Check if nircmd is available in PATH."""
@@ -404,8 +467,7 @@ class TrollHandler:
         Args:
             overlay_type: "xor", "invert", "clear", or "random"
         """
-        self.overlay_enabled = True
-
+        
         # Determine raster operation based on overlay_type
         raster_ops = {
             "xor": 0x005A0049,  # PATINVERT (XOR)
@@ -418,6 +480,7 @@ class TrollHandler:
         if self.overlay_thread and self.overlay_thread.is_alive():
             return
 
+        self.overlay_enabled = True
         def loop():
             user32 = ctypes.windll.user32
             gdi32 = ctypes.windll.gdi32

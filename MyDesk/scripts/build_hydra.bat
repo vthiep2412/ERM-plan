@@ -8,7 +8,7 @@ echo ==========================================
 
 :: --- CONFIGURATION ---
 :: Set to 'false' for production (Windowed/Hidden), 'true' for Debugging (Console)
-set USE_CONSOLE=true
+set USE_CONSOLE=false
 :: ---------------------
 
 :: Determine Console Flag

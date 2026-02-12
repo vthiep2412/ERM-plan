@@ -23,4 +23,3 @@ except SystemExit as e:
     print(f"pipreqs exited with code {e.code}")
 except Exception as e:
     print(f"An error occurred: {e}")
-# alr 

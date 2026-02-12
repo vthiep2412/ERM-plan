@@ -348,4 +348,4 @@ class ClipboardTab(QWidget):
             self.rebuild_history_ui()
 
 
-# alr
+

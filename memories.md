@@ -1,44 +1,91 @@
 # 🧠 Project Memories & Context
 
-**Last Updated:** 2026-02-05 6:47 PM
-**Project:** MyDesk (Remote Administration & Support Tool)
+**Last Updated:** 2026-02-12 12:05 PM
+**Project:** MyDesk (Remote Administration Tool)
 
 ## 📌 Status Overview
-The project is a functional prototype of a Remote Administration Tool. It uses a **Broker-Agent-Viewer** architecture. The codebase is Python-based, utilizing `asyncio` and `websockets`.
+MyDesk is a mature Remote Administration Tool (RAT, not Trojan) prototype using a **Registry-Agent-Viewer** architecture. It has transitioned from simple TCP streaming to high-performance **WebRTC** (Project Supersonic UDP) with hardware acceleration.
 
 ## 🏗️ Architecture Nuances
+- **Discovery (Registry)**:
+    - Agents register with a global registry (`mydesk-registry.vercel.app`) via a heartbeat loop.
+    - Uses Firebase for data persistence.
+    - Heartbeat includes fallback to `curl` if standard Python SSL libraries fail in restricted environments.
 - **Communication Flow**:
-    - Agents register with the Broker using `OP_HELLO`.
-    - Viewers lookup Agents using `OP_LOOKUP`.
-    - The Broker facilitates a **Bridge** (relay) by default but supports **Direct** connection handoffs if the Agent advertises a public URL (e.g., ngrok).
-- **Protocol**: 
-    - Defined in `MyDesk/core/protocol.py`.
-    - Uses a mix of binary prefixes and text/JSON payloads.
-    - Extensive feature set defined: Webcam, Audio (Mic & System Loopback), File Manager, Shell, Clipboard, and "Troll" features.
-    - **Ghost Mode**: Agent employs "detached session" logic. Shells and Keyloggers persist across network disconnections, and output is buffered (up to 5000 items) and replayed on reconnection.
+    - **Control Channel**: WebSockets (WSS/WS) through Cloudflare Tunnels (using `cloudflared.exe`).
+    - **Media Channel**: WebRTC (using `aiortc`). Direct P2P if possible, or via signaling relay.
+- **Protocol (`MyDesk/core/protocol.py`)**:
+    - **WebRTC Signaling**: SDP Offer (0x05), Answer (0x06), ICE Candidates (0x07).
+    - **Feature Rich**: Detailed handlers for File Manager (0x78-0x7F), Process Manager (0x74-0x76), Clipboard (0x80-0x87), and Device Settings (0x88-0x91).
+- **Ghost Mode**:
+    - Agent uses an `output_buffer` (deque, max 5000 items) to store shell output, keylogs, and clipboard entries during disconnection.
+    - Data is automatically replayed to the viewer upon reconnection.
+
+## 🏗️ Component Breakdown
+### `MyDesk/targets/` (The Agent)
+- `agent.py`: High-concurrency async orchestrator. Manages heartbeat, tunneling, and message routing.
+- `webrtc_handler.py`: **Hardware-accelerated** video streaming. Priority: `NVENC` (Nvidia) > `QSV` (Intel) > `AMF` (AMD) > CPU (`libx264`).
+- `protection.py`: Implements process persistence via Windows ACLs to prevent termination.
+- `tunnel_manager.py`: Automated `cloudflared` lifecycle management.
+- `troll_handler.py`: Prank suite utilizing MCI for overlapping, non-blocking audio effects.
+
+### `MyDesk/viewer/` (The Controller)
+- `main.py`: PyQt6-based dashboard.
+- `session.py`: Manages the lifecycle of a remote viewing session.
+- `webrtc_client.py`: Client-side WebRTC logic for receiving high-speed video.
 
 ## 🔑 Key Files to Watch
-- `MyDesk/broker/server.py`: The heart of the connectivity code. Handling connection state and bridging logic here is critical.
-- `MyDesk/core/protocol.py`: The single source of truth for OpCodes. **Do not change OpCodes randomly** as it will break compatibility between Agent/Broker/Viewer.
-- `MyDesk/agent_loader.py`: The entry point. It modifies `sys.path` to load the `targets` package (renamed from `target` on 2026-02-06).
+- `MyDesk/targets/agent.py`: Core logic for the agent's behavior and persistence.
+- `MyDesk/core/protocol.py`: Single source of truth for all communication OpCodes.
+- `MyDesk/scripts/build_hydra.bat`: Main build script for compiling the agent.
 
-## 💡 Context for Next Steps
-- **Deployment**: `MyDesk_Broker_Deploy` contains deployment scripts, likely for a VPS or cloud instance.
-- **Client Identification**: Clients are identified by an ID string sent during `OP_HELLO`.
-- **Security**: There is currently **NO** visible authentication or encryption layer beyond standard WSS (if configured) and the opacity of the protocol. This might be a future improvement area.
+## 🧪 Testing & Building
 
-## 📉 Performance & Bottlenecks (Found 2026-02-05)
-- **Cloudflare Tunnel Latency**: Traffic likely hairpins (Agent -> Cloudflare -> Broker -> Viewing Network). Real-time video over TCP-based WebSockets via tunnel suffers from Head-of-Line blocking.
-- **Webcam vs Screen Share**:
-    - **Screen Share (`capture.py`)**: Highly optimized. Uses **Delta Tiling** (only sends modified 32x32 blocks). Effective for desktop usage.
-    - **Webcam (`webcam.py`)**: Inefficient. Sends **Full JPEG** for every frame (MJPEG-style) at 320x240/15fps. No delta compression or H.264 streaming. This explains why it is significantly slower than screen share.
+### Syntax Verification
+```bash
+# From project root (ERM-plan/)
+.\\MyDesk\\scripts\\integration_test.bat
+```
+- Validates all core and target modules can be imported
+- Runs deep logic checks (ScreenShareTrack, InputController, Protocol constants)
+- Expected result: `ALL SAFE CHECKS PASSED`
 
-### 🐢 Why is it slower than Discord/Skype?
-- **Protocol**: MyDesk uses **TCP (WebSockets)**. TCP waits for every packet to arrive in order. If one packet drops, the video freezes. Discord/Skype use **UDP (WebRTC)** which skips lost packets for real-time speed.
-- **Compression**: MyDesk uses Python-based image tiling or MJPEG. Discord/Skype use **Video Codecs** (H.264/VP8) with hardware acceleration, motion vectors, and temporal compression, which are 100x more efficient.
+### Build Agent (Hydra Build)
+```bash
+# From project root (ERM-plan/)
+cd MyDesk
+scripts\build_hydra.bat
+```
+- Builds 3 executables: `MyDeskAgent.exe`, `MyDeskAudio.exe`, `MyDeskSetup.exe`
+- Output: `MyDesk/dist/MyDeskSetup.exe`
+- Set `USE_CONSOLE=true` in the bat file for debug builds (shows console window)
+- **Rebuild required** when changing anything in `targets/`, `core/`, or shared modules
+
+### Running the Viewer (no build needed)
+```bash
+# From project root (ERM-plan/)
+python MyDesk/viewer/main.py
+```
+- Viewer runs directly from source (PyQt6), no compilation needed
+
+## 🔧 Engineering Notes
+- **WebRTC Optimization**: We've forced `LOW_DELAY` and `zerolatency` presets in the H.264 encoder to achieve sub-100ms latency.
+- **Port Liberation**: The agent includes a "Port Liberator" that kills processes occupying its required ports on startup.
+- **Security**: Current focus is on connectivity and features. No end-to-end encryption (E2EE) is implemented yet; relies on WSS/WebRTC security.
+
+## ⚠️ Known Limitations
+- **Tunnel Overhead**: Latency is mostly introduced by the Cloudflare Tunnel hairpin (~50-150ms).
+- **Admin Rights**: Many features (UAC bypass, ACL protection, InputBlock mode) require the agent to run as SYSTEM or Administrator.
+- **Upload Size Limit**: `fm_tab.py` has `MAX_UPLOAD_BYTES = 100 MB` hard cap in the UI.
+
+## 📋 Recent Changes (2026-02-12)
+- **Chunked File Transfer**: Files >5MB use 256KB chunks with `QProgressDialog` (both upload and download).
+  - New OpCode: `OP_FM_DOWNLOAD_INFO = 0x7F` (sends file size before download chunks).
+  - Agent supports chunked upload receiver via `OP_FM_CHUNK`.
+- **Connection Speed Indicator**: Toolbar shows real-time bandwidth (green) or "Connection Lost" (red).
 
 ## 📝 Instructions for Updating This File
-If you modify the architecture or add new modules:
-1. Update **Status Overview**.
-2. Add any new **Key Files**.
-3. Note any **Protocol Changes** in `Architecture Nuances`.
+1. Update **Last Updated** timestamp.
+2. Note any new **OpCodes** or **Protocol Changes**.
+3. Document any new **Hardware Support** or **Security Layers**.
+4. Add significant features to **Recent Changes** with date.

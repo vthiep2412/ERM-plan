@@ -108,7 +108,7 @@ class ClipboardHandler:
 
     def start_monitoring(self):
         if self._monitoring:
-            return  # Already monitoring
+            return  eady monitoring
         """Start background clipboard monitoring."""
         with self._lock:
             if self._monitoring:

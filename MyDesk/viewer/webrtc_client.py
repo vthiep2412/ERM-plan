@@ -62,6 +62,7 @@ class WebRTCClient(QObject if PYQT_AVAILABLE else object):
         self.pc = None
         self.connected = False
         self._ice_candidates_queue = []
+        self._frame_count = 0  # Frame counter for FPS display
 
     async def start_connection(self):
         """
@@ -116,7 +117,7 @@ class WebRTCClient(QObject if PYQT_AVAILABLE else object):
         offer = await self.pc.createOffer()
         await self.pc.setLocalDescription(offer)
 
-        # Hack: Modify SDP to increase bitrate limit to 10 Mbps (10000 kbps)
+        # Hack: Modify SDP to increase bitrate limit to 30 Mbps
         # This forces the remote encoder to target higher quality
         sdp = self.pc.localDescription.sdp
         sdp_lines = sdp.splitlines()
@@ -134,7 +135,7 @@ class WebRTCClient(QObject if PYQT_AVAILABLE else object):
 
         offer_with_high_bitrate = "\r\n".join(new_lines) + "\r\n"
 
-        print("[Viewer WebRTC] Sent SDP offer (High Quality: 10Mbps)")
+        print("[Viewer WebRTC] Sent SDP offer (High Quality: 30Mbps)")
 
         offer_data = json.dumps(
             {"sdp": offer_with_high_bitrate, "type": self.pc.localDescription.type}
@@ -181,6 +182,9 @@ class WebRTCClient(QObject if PYQT_AVAILABLE else object):
             while True:
                 frame = await track.recv()
 
+                # Count frames for FPS display
+                self._frame_count += 1
+
                 # Convert av.VideoFrame to numpy array
                 img = frame.to_ndarray(format="rgb24")
 
@@ -190,6 +194,23 @@ class WebRTCClient(QObject if PYQT_AVAILABLE else object):
         except Exception as e:
             if "MediaStreamError" not in str(type(e)):
                 print(f"[Viewer WebRTC] Video receive error: {e}")
+
+    async def get_bytes_received(self):
+        """Get real compressed bytes received from WebRTC stats."""
+        if not self.pc:
+            return 0
+        try:
+            stats = await self.pc.getStats()
+            total = 0
+            for report in stats.values():
+                if hasattr(report, 'type') and report.type == 'inbound-rtp':
+                    total += getattr(report, 'bytesReceived', 0)
+            # Return delta since last call
+            delta = total - self._last_stats_bytes
+            self._last_stats_bytes = total
+            return max(delta, 0)
+        except Exception:
+            return 0
 
     async def close(self):
         """Close the WebRTC connection"""
