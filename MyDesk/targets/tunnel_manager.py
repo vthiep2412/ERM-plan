@@ -82,7 +82,7 @@ class TunnelManager:
                             check=True,
                             stdout=subprocess.DEVNULL,
                             stderr=subprocess.DEVNULL,
-                            creationflags=0x08000000 # CREATE_NO_WINDOW
+                            creationflags=subprocess.CREATE_NO_WINDOW
                         )
                         print(f"[+] Curl Download Success: {path}")
                     except (subprocess.CalledProcessError, FileNotFoundError):
@@ -95,7 +95,7 @@ class TunnelManager:
                             check=True,
                             stdout=subprocess.DEVNULL,
                             stderr=subprocess.DEVNULL,
-                            creationflags=0x08000000
+                            creationflags=subprocess.CREATE_NO_WINDOW
                         )
                         print(f"[+] PowerShell Download Success: {path}")
 
@@ -141,12 +141,6 @@ class TunnelManager:
             f"http://localhost:{self.port}",
         ]
 
-        # Prevent console window popping up
-        startupinfo = None
-        if os.name == "nt":
-            startupinfo = subprocess.STARTUPINFO()
-            startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
-
         print(f"[*] Tunnel Subprocess: Executing {cmd}")
         try:
             self.process = subprocess.Popen(
@@ -154,7 +148,7 @@ class TunnelManager:
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.PIPE,
                 stdin=subprocess.DEVNULL,
-                startupinfo=startupinfo,
+                creationflags=subprocess.CREATE_NO_WINDOW,
                 text=True,
                 bufsize=1,
             )
@@ -294,17 +288,12 @@ class TunnelManager:
                 f"http://localhost:{self.port}",
             ]
 
-            startupinfo = None
-            if os.name == "nt":
-                startupinfo = subprocess.STARTUPINFO()
-                startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
-
             self.process = subprocess.Popen(
                 cmd,
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.PIPE,
                 stdin=subprocess.DEVNULL,
-                startupinfo=startupinfo,
+                creationflags=subprocess.CREATE_NO_WINDOW,
                 text=True,
                 bufsize=1,
             )

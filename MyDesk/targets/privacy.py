@@ -89,7 +89,7 @@ class PrivacyCurtain:
 
     def enable(self):
         if self.active:
-            return  eady enabled
+            return
         self.active = True
         self._thread_running = True
         self._thread = threading.Thread(target=self._show_curtain, daemon=True)

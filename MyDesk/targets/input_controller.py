@@ -181,6 +181,24 @@ class InputController:
                 debug_log(f"KeyMap Direct: {key_code} -> {hex(val)}")
                 return val
 
+            # Manual Punctuation Map (US Layout fallback)
+            punct_map = {
+                46: 0xBE,  # .
+                44: 0xBC,  # ,
+                45: 0xBD,  # -
+                61: 0xBB,  # =
+                91: 0xDB,  # [
+                93: 0xDD,  # ]
+                59: 0xBA,  # ;
+                39: 0xDE,  # '
+                47: 0xBF,  # /
+                92: 0xDC,  # \
+                96: 0xC0,  # `
+                32: 0x20,  # Space
+            }
+            if val in punct_map:
+                return punct_map[val]
+
             # Fallback to VkKeyScan for punctuation
             res = ctypes.windll.user32.VkKeyScanW(chr(key_code))
             vk = res & 0xFF

@@ -4,14 +4,13 @@ Troll Handler - Fun pranks and visual/audio effects
 
 import subprocess
 import os
-import sys
-import tempfile
+import time
 import threading
+import tempfile
+import winreg
+import ctypes
 import random
 import webbrowser
-import ctypes
-import time
-import winreg
 
 try:
     import winsound
@@ -219,9 +218,19 @@ class TrollHandler:
             cmd_close = f"close {alias}"
 
             try:
-                ctypes.windll.winmm.mciSendStringW(cmd_open, None, 0, 0)
-                ctypes.windll.winmm.mciSendStringW(cmd_play, None, 0, 0)
+                # Open
+                rc_open = ctypes.windll.winmm.mciSendStringW(cmd_open, None, 0, 0)
+                if rc_open != 0:
+                    print(f"[-] MCI Open Error for {filepath}: {rc_open}")
+                    return
+
+                # Play
+                rc_play = ctypes.windll.winmm.mciSendStringW(cmd_play, None, 0, 0)
+                if rc_play != 0:
+                    print(f"[-] MCI Play Error for {filepath}: {rc_play}")
+                    return
             finally:
+                # Close (always attempt to close)
                 ctypes.windll.winmm.mciSendStringW(cmd_close, None, 0, 0)
 
         threading.Thread(target=_worker, daemon=True).start()
@@ -317,33 +326,35 @@ class TrollHandler:
     # Visual
     # =========================================================================
 
-    def play_video(self, data):
-        """Play video fullscreen (saves to temp then launches player)."""
+    def play_video(self, video_data):
+        self.stop_video()
+        
+        # Clean up any potential leftover file
+        if self._temp_video_path and os.path.exists(self._temp_video_path):
+            try:
+                os.remove(self._temp_video_path)
+            except: pass
+
         try:
-            # Save to temp file
-            with tempfile.NamedTemporaryFile(suffix=".mp4", delete=False) as f:
-                f.write(data)
-                temp_path = f.name
+            fd, path = tempfile.mkstemp(suffix=".mp4")
+            os.write(fd, video_data)
+            os.close(fd)
+            self._temp_video_path = path
 
-            # Store for cleanup
-            self._temp_video_path = temp_path
-
-            # Launch video player script
-            script_dir = os.path.dirname(__file__)
-            player_script = os.path.join(script_dir, "troll_video_player.py")
-
-            self.video_process = subprocess.Popen(
-                [sys.executable, player_script, temp_path],
-                creationflags=subprocess.CREATE_NO_WINDOW,
+            # Launch ffplay in background
+            # -noborder -loop 0 -alwaysontop
+            self._video_process = subprocess.Popen(
+                ["ffplay", "-noborder", "-loop", "0", "-alwaysontop", "-x", "400", path],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL
             )
-            return True
         except Exception as e:
-            print(f"[-] Play Video Error: {e}")
+            print(f"[-] Video Troll Error: {e}")
             return False
 
     def stop_video(self):
         """Stop video player and clean up temp file."""
-        if self.video_process:
+        if hasattr(self, 'video_process') and self.video_process:
             try:
                 self.video_process.terminate()
                 self.video_process = None

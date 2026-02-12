@@ -12,7 +12,6 @@ try:
         RTCPeerConnection,
         RTCSessionDescription,
         RTCConfiguration,
-        RTCIceServer,
     )
     from aiortc.contrib.media import MediaRelay
     from aiortc.codecs import h264

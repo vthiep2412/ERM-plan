@@ -1,6 +1,5 @@
 import win32api
 import win32security
-import win32con
 from ctypes import windll, c_bool
 
 

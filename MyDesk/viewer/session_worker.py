@@ -55,13 +55,26 @@ class AsyncSessionWorker(QObject):
         self._lock = threading.Lock()
 
         # Bandwidth tracking (read/reset by UI timer each second)
+        self._stats_lock = threading.Lock()
         self._bytes_received = 0
         self._bytes_sent = 0
         self._webrtc_frames = 0
+        
+        # Pending tasks set (for WebRTC handlers)
+        self._pending_tasks = set()
 
         # WebRTC client (Project Supersonic)
         self.webrtc_client = None
         self.use_webrtc = AIORTC_AVAILABLE  # Auto-enable if available
+
+    def get_and_reset_stats(self):
+        """Atomically get and reset bandwidth counters."""
+        with self._stats_lock:
+            stats = (self._bytes_received, self._bytes_sent, self._webrtc_frames)
+            self._bytes_received = 0
+            self._bytes_sent = 0
+            self._webrtc_frames = 0
+            return stats
 
     def is_connected(self):
         """Thread-safe connection check"""
@@ -78,22 +91,41 @@ class AsyncSessionWorker(QObject):
         """Graceful shutdown"""
         self.running = False
         with self._lock:
+            futures = []
+            
             # Close WebRTC connection
             if self.webrtc_client and self.loop and self.loop.is_running():
-                asyncio.run_coroutine_threadsafe(self.webrtc_client.close(), self.loop)
-                self.webrtc_client = None
+                futures.append(asyncio.run_coroutine_threadsafe(self.webrtc_client.close(), self.loop))
 
             if self.ws:
                 # Schedule close if loop exists
                 if self.loop and self.loop.is_running():
-                    asyncio.run_coroutine_threadsafe(self.ws.close(), self.loop)
-                self.ws = None
+                    futures.append(asyncio.run_coroutine_threadsafe(self.ws.close(), self.loop))
+
+            # Wait for closures (avoid race where loop stops before close)
+            for f in futures:
+                try:
+                    f.result(timeout=2.0)
+                except TimeoutError:
+                    print(f"[-] Shutdown: Connection close")
+                except Exception as e:
+                    print(f"[-] Shutdown error: {repr(e)}")
+            
+            self.webrtc_client = None
+            self.ws = None
+            
+            # Cancel pending tasks
+            if self.loop and self.loop.is_running():
+                for t in self._pending_tasks.copy():
+                    self.loop.call_soon_threadsafe(t.cancel)
+                self._pending_tasks.clear()
 
     def send_msg(self, data: bytes):
         """Send a message to the agent from UI thread."""
         with self._lock:
             if self.ws and self.loop and self.loop.is_running():
-                self._bytes_sent += len(data)
+                with self._stats_lock:
+                    self._bytes_sent += len(data)
                 asyncio.run_coroutine_threadsafe(send_msg(self.ws, data), self.loop)
 
     def _run_loop(self):
@@ -165,8 +197,8 @@ class AsyncSessionWorker(QObject):
                             # Enter message loop
                             await self._read_loop(ws)
                             return
-                    except Exception:
-                        pass
+                    except Exception as e:
+                        print(f"[-] Handshake parse error: {e} | Payload: {reply}")
 
                 # Fallback for legacy (if any) or failed handshake
                 print("[-] Handshake Failed")
@@ -233,10 +265,12 @@ class AsyncSessionWorker(QObject):
         """Handle incoming WebRTC video frame (numpy array)"""
         try:
             # Count frames for FPS display
-            self._webrtc_frames += 1
+            with self._stats_lock:
+                self._webrtc_frames += 1
             # Estimate compressed download (H.264 ~30:1 ratio, pkt_size unavailable)
             if hasattr(frame, 'nbytes'):
-                self._bytes_received += frame.nbytes // 30
+                with self._stats_lock:
+                    self._bytes_received += frame.nbytes // 30
             # Emit to UI (same signal path as old frames)
             self.webrtc_frame_received.emit(frame)
         except Exception as e:
@@ -256,7 +290,8 @@ class AsyncSessionWorker(QObject):
             payload = msg[1:]
 
             # Track bandwidth
-            self._bytes_received += len(msg)
+            with self._stats_lock:
+                self._bytes_received += len(msg)
 
             if opcode == protocol.OP_IMG_FRAME:
                 self.frame_received.emit(payload)
@@ -356,11 +391,13 @@ class AsyncSessionWorker(QObject):
                 if self.webrtc_client:
                     try:
                         data = json.loads(payload.decode("utf-8"))
-                        asyncio.create_task(
+                        task = asyncio.create_task(
                             self.webrtc_client.handle_answer(
                                 data.get("sdp"), data.get("type", "answer")
                             )
                         )
+                        self._pending_tasks.add(task)
+                        task.add_done_callback(self._pending_tasks.discard)
                     except Exception as e:
                         print(f"[!] WebRTC answer error: {e}")
 
@@ -368,9 +405,11 @@ class AsyncSessionWorker(QObject):
                 if self.webrtc_client:
                     try:
                         data = json.loads(payload.decode("utf-8"))
-                        asyncio.create_task(
+                        task = asyncio.create_task(
                             self.webrtc_client.handle_ice_candidate(data)
                         )
+                        self._pending_tasks.add(task)
+                        task.add_done_callback(self._pending_tasks.discard)
                     except Exception as e:
                         print(f"[!] WebRTC ICE candidate error: {e}")
 

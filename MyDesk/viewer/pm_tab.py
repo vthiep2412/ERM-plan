@@ -100,7 +100,7 @@ class PMTab(QWidget):
         self.table.setColumnCount(4)
         self.table.setHorizontalHeaderLabels(["PID", "Name", "CPU %", "Memory (MB)"])
         self.table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
-        self.table.setSelectionMode(QTableWidget.SelectionMode.SingleSelection)
+        self.table.setSelectionMode(QTableWidget.SelectionMode.ExtendedSelection)
         self.table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
         self.table.setAlternatingRowColors(True)
         self.table.setSortingEnabled(True)  # Enable Sorting
@@ -191,36 +191,50 @@ class PMTab(QWidget):
             self.table.setItem(row, 3, NumericTableWidgetItem(mem, f"{mem:.1f}"))
 
     def kill_selected(self):
-        """Kill selected process."""
-        selected = self.table.selectedItems()
-        if not selected:
+        """Kill selected process(es)."""
+        selected_items = self.table.selectedItems()
+        if not selected_items:
             QMessageBox.warning(
-                self, "No Selection", "Please select a process to kill."
+                self, "No Selection", "Please select process(es) to kill."
             )
             return
 
-        row = selected[0].row()
-        pid_item = self.table.item(row, 0)
-        name_item = self.table.item(row, 1)
+        # Gather unique PIDs from selected rows
+        candidates = {}  # pid -> name
+        
+        for item in selected_items:
+            row = item.row()
+            pid_item = self.table.item(row, 0)
+            name_item = self.table.item(row, 1)
+            
+            if not pid_item:
+                continue
+                
+            try:
+                pid = int(pid_item.text())
+                # Only add if we have a valid PID
+                name = name_item.text() if name_item else "Unknown"
+                candidates[pid] = name
+            except ValueError:
+                continue
 
-        if not pid_item:
+        if not candidates:
             return
 
-        # Safe PID conversion with ValueError handling
-        try:
-            pid = int(pid_item.text())
-        except ValueError:
-            QMessageBox.warning(self, "Invalid PID", "Could not parse process ID.")
-            return
-
-        name = name_item.text() if name_item else "Unknown"
+        count = len(candidates)
+        if count == 1:
+            pid, name = list(candidates.items())[0]
+            msg = f"Are you sure you want to kill process?\n\nPID: {pid}\nName: {name}"
+        else:
+            msg = f"Are you sure you want to kill {count} processes?"
 
         reply = QMessageBox.question(
             self,
             "Confirm Kill",
-            f"Are you sure you want to kill process?\n\nPID: {pid}\nName: {name}",
+            msg,
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
         )
 
         if reply == QMessageBox.StandardButton.Yes:
-            self.kill_signal.emit(pid)
+            for pid in candidates:
+                self.kill_signal.emit(pid)

@@ -331,12 +331,12 @@ class SessionWindow(QMainWindow):
         self.toolbar.addAction(self.act_cam)
 
         # Mic
-        self.act_mic = QAction("🎙️ Audio", self, checkable=True)
+        self.act_mic = QAction("🎙️ Mic", self, checkable=True)
         self.act_mic.triggered.connect(self.toggle_mic)
         self.toolbar.addAction(self.act_mic)
 
         # System Audio
-        self.act_sys_audio = QAction("🔊 System", self, checkable=True)
+        self.act_sys_audio = QAction("🔊 Audio", self, checkable=True)
         self.act_sys_audio.triggered.connect(self.toggle_sys_audio)
         self.toolbar.addAction(self.act_sys_audio)
 
@@ -391,13 +391,8 @@ class SessionWindow(QMainWindow):
         if not hasattr(self, 'worker') or not self.worker:
             return
 
-        # Read and reset all counters
-        bytes_in = self.worker._bytes_received
-        bytes_out = self.worker._bytes_sent
-        fps = self.worker._webrtc_frames
-        self.worker._bytes_received = 0
-        self.worker._bytes_sent = 0
-        self.worker._webrtc_frames = 0
+        # Read and reset all counters atomically
+        bytes_in, bytes_out, fps = self.worker.get_and_reset_stats()
 
         total = bytes_in + bytes_out + fps
 
@@ -730,8 +725,11 @@ class SessionWindow(QMainWindow):
         return {"method": "MSS", "quality": 50, "scale": 90, "format": "JPEG"}
 
     def save_settings(self):
-        with open(SETTINGS_FILE, "w") as f:
-            json.dump(self.capture_settings, f)
+        try:
+            with open(SETTINGS_FILE, "w") as f:
+                json.dump(self.capture_settings, f)
+        except Exception as e:
+            print(f"[-] Failed to save settings: {e}")
 
     def send_command(self, opcode, payload=b""):
         try:
@@ -803,6 +801,25 @@ class SessionWindow(QMainWindow):
         try:
             self._download_file = open(local_path, "wb")
             self._download_path = local_path
+            
+            # Safety timeout: Close if no data received within 30s
+            self._download_timer = QTimer(self)
+            self._download_timer.setSingleShot(True)
+            def _timeout():
+                if self._download_file:
+                    print("[-] Download timed out (no data)")
+                    try:
+                        self._download_file.close()
+                    except: pass
+                    try: 
+                        os.remove(self._download_path)
+                    except: pass
+                    self._download_file = None
+                    self._download_path = None
+                    QMessageBox.warning(self, "Timeout", "Download timed out waiting for agent.")
+            self._download_timer.timeout.connect(_timeout)
+            self._download_timer.start(30000)
+            
         except Exception as e:
             QMessageBox.critical(self, "Download Error", f"Cannot create file:\n{e}")
             return
@@ -830,6 +847,10 @@ class SessionWindow(QMainWindow):
 
     def _on_fm_chunk(self, data: bytes):
         """Handle incoming file download chunks from agent."""
+        if hasattr(self, '_download_timer') and self._download_timer:
+            self._download_timer.stop()
+            self._download_timer = None
+
         if not self._download_file:
             return
 
@@ -854,6 +875,11 @@ class SessionWindow(QMainWindow):
 
         # Check for user cancellation
         if self._download_progress and self._download_progress.wasCanceled():
+            # Notify agent to stop sending (send EOF-like signal or close)
+            # Currently no specific CANCEL opcode, so we rely on closing side or ignoring
+            # Adding explicit log for now. Ideally sending OP_FM_CHUNK(empty path) or similar if supported.
+            print("[*] User cancelled download.")
+            
             try:
                 self._download_file.close()
             except Exception:
@@ -881,8 +907,15 @@ class SessionWindow(QMainWindow):
                 self._download_file.close()
             except Exception:
                 pass
+            # Clean up partial file
+            try:
+                os.remove(self._download_path)
+            except Exception:
+                pass
             self._download_file = None
             self._download_path = None
+            self._download_total = 0
+            self._download_received = 0
             if self._download_progress:
                 self._download_progress.close()
                 self._download_progress = None
@@ -1026,8 +1059,28 @@ class SessionWindow(QMainWindow):
 
     def closeEvent(self, event):
         self.closing = True
+        
+        # Stop timers
+        if hasattr(self, '_speed_timer') and self._speed_timer:
+            self._speed_timer.stop()
+        if hasattr(self, '_download_timer') and self._download_timer:
+            self._download_timer.stop()
+
+        # Close download file if open
+        if hasattr(self, '_download_file') and self._download_file:
+            try:
+                self._download_file.close()
+                self._download_file = None
+            except: pass
+
         self.worker.stop()
-        self.player.stop()
+        if self.player:
+            self.player.stop()
+        if hasattr(self, 'sys_player') and self.sys_player:
+            self.sys_player.stop()
+            
+        if hasattr(self, 'webcam_win') and self.webcam_win:
+            self.webcam_win.close()
+            
         self.keylog_widget.close()
         super().closeEvent(event)
-

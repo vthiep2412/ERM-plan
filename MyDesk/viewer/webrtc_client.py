@@ -12,6 +12,7 @@ try:
         RTCSessionDescription,
         RTCConfiguration,
         RTCIceServer,
+        RTCIceCandidate,
     )
 
     AIORTC_AVAILABLE = True
@@ -61,6 +62,11 @@ class WebRTCClient(QObject if PYQT_AVAILABLE else object):
         self.send_message = send_message_callback
         self.pc = None
         self.connected = False
+        # Stats
+        self._last_stats_timestamp = 0
+        self._last_stats_bytes = 0
+        
+        # Queue for candidates arriving before PC is ready
         self._ice_candidates_queue = []
         self._frame_count = 0  # Frame counter for FPS display
 
@@ -80,6 +86,16 @@ class WebRTCClient(QObject if PYQT_AVAILABLE else object):
             ]
         )
         self.pc = RTCPeerConnection(configuration=config)
+        
+        # Drain queued candidates
+        while self._ice_candidates_queue:
+            candidate_dict = self._ice_candidates_queue.pop(0)
+            candidate = RTCIceCandidate(
+                candidate=candidate_dict.get("candidate"),
+                sdpMid=candidate_dict.get("sdpMid"),
+                sdpMLineIndex=candidate_dict.get("sdpMLineIndex"),
+            )
+            await self.pc.addIceCandidate(candidate)
 
         # Set up event handlers
         @self.pc.on("connectionstatechange")

@@ -31,7 +31,7 @@ OP_SYS_AUDIO_CHUNK = 0x62
 
 # Session Protocol (Peer-to-Peer or Bridged)
 OP_IMG_FRAME = 10  # Video Frame (JPEG/ZSTD)
-OP_AUDIO_CHUNK = 11  # Audio Data
+OP_SESSION_AUDIO = 11  # Audio Data
 
 # Input / Control
 OP_MOUSE_MOVE = 20  # x, y
@@ -115,7 +115,7 @@ OP_SYSINFO_DATA = 0x90  # JSON {os, cpu, ram, disk, battery, wifi_available}
 OP_POWER_ACTION = 0x91  # {"action": "sleep|restart|shutdown|lock|logoff"}
 
 # ============================================================================
-# Troll (0x98-0x9F, 0xA0-0xA3) - Rebased
+# Troll (0x98-0xA5) - Rebased
 # REQUIRES ADMIN CONSENT & AUDIT LOGGING
 # ============================================================================
 OP_TROLL_URL = 0x98  # {"url": "..."}
