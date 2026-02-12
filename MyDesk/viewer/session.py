@@ -803,6 +803,9 @@ class SessionWindow(QMainWindow):
             self._download_path = local_path
             
             # Safety timeout: Close if no data received within 30s
+            # Stop any existing timer first
+            if hasattr(self, '_download_timer') and self._download_timer:
+                self._download_timer.stop()
             self._download_timer = QTimer(self)
             self._download_timer.setSingleShot(True)
             def _timeout():
@@ -810,10 +813,10 @@ class SessionWindow(QMainWindow):
                     print("[-] Download timed out (no data)")
                     try:
                         self._download_file.close()
-                    except: pass
+                    except Exception: pass
                     try: 
                         os.remove(self._download_path)
-                    except: pass
+                    except Exception: pass
                     self._download_file = None
                     self._download_path = None
                     QMessageBox.warning(self, "Timeout", "Download timed out waiting for agent.")
@@ -1071,7 +1074,7 @@ class SessionWindow(QMainWindow):
             try:
                 self._download_file.close()
                 self._download_file = None
-            except: pass
+            except Exception: pass
 
         self.worker.stop()
         if self.player:

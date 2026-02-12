@@ -63,7 +63,6 @@ class WebRTCClient(QObject if PYQT_AVAILABLE else object):
         self.pc = None
         self.connected = False
         # Stats
-        self._last_stats_timestamp = 0
         self._last_stats_bytes = 0
         
         # Queue for candidates arriving before PC is ready
