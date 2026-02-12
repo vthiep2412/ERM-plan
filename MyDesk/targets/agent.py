@@ -173,6 +173,7 @@ class AsyncAgent:
         # Chunked upload state
         self._upload_file = None   # Open file handle for active chunked upload
         self._upload_path = None   # Remote path being written to
+        self._upload_lock = asyncio.Lock()
         self.background_tasks = set()
         self.consecutive_heartbeat_fails = 0
 
@@ -807,6 +808,16 @@ class AsyncAgent:
         except Exception as e:
             print(f"[-] Failed to unblock input: {e}")
 
+        # 7. Cleanup Upload State
+        async with self._upload_lock:
+            if self._upload_file:
+                try:
+                    self._upload_file.close()
+                except Exception:
+                    pass
+                self._upload_file = None
+                self._upload_path = None
+
         print("[+] Session Cleanup Complete")
 
     # Old temporary deprecated function
@@ -1208,7 +1219,7 @@ class AsyncAgent:
                             data = json.loads(payload.decode("utf-8"))
                             setting_id = int(data.get("id", 0))
                             value = data.get("value")
-                        except:
+                        except Exception:
                             # Fallback to bytes: [ID][Bool]
                             if len(payload) >= 2:
                                 setting_id = payload[0]
@@ -1434,14 +1445,18 @@ class AsyncAgent:
                                         self._send_async(protocol.OP_ERROR, b"FM: Safety Mode On but Base Dir not configured")
                                         return
 
-                                    base = os.path.abspath(os.path.normpath(self.file_mgr.base_dir))
-                                    real = os.path.abspath(os.path.normpath(path))
+                                    base = os.path.realpath(self.file_mgr.base_dir)
+                                    real = os.path.realpath(path)
                                     
-                                    try:
-                                        containment = os.path.commonpath([base, real]) == base
-                                    except ValueError:
-                                        # Different drives or mix of relative/absolute
-                                        containment = False
+                                    # Drive Check (Windows)
+                                    if os.name == 'nt' and os.path.splitdrive(real)[0].lower() != os.path.splitdrive(base)[0].lower():
+                                         containment = False
+                                    else:
+                                        try:
+                                            containment = os.path.commonpath([base, real]) == base
+                                        except ValueError:
+                                            # Different drives or mix of relative/absolute
+                                            containment = False
 
                                     if not containment:
                                         msg = f"FM: Upload Path rejected (Safety Mode): {path}"
@@ -1457,8 +1472,9 @@ class AsyncAgent:
                                 os.makedirs(parent, exist_ok=True)
                             
                             try:
-                                self._upload_file = open(path, "wb")
-                                self._upload_path = path
+                                async with self._upload_lock:
+                                    self._upload_file = open(path, "wb")
+                                    self._upload_path = path
                             except Exception as e:
                                 print(f"[-] Upload open failed: {e}")
                                 self._send_async(protocol.OP_ERROR, f"Upload failed: {e}".encode())
@@ -1468,31 +1484,32 @@ class AsyncAgent:
 
                 elif opcode == protocol.OP_FM_CHUNK:
                     # Incoming upload chunk from Viewer
-                    if self._upload_file:
-                        try:
-                            if not payload:
-                                # EOF: close file and refresh listing
-                                self._upload_file.close()
-                                print(f"[+] FM Chunked Upload Complete: {self._upload_path}")
-                                parent = os.path.dirname(self._upload_path)
+                    async with self._upload_lock:
+                        if self._upload_file:
+                            try:
+                                if not payload:
+                                    # EOF: close file and refresh listing
+                                    self._upload_file.close()
+                                    print(f"[+] FM Chunked Upload Complete: {self._upload_path}")
+                                    parent = os.path.dirname(self._upload_path)
+                                    self._upload_file = None
+                                    self._upload_path = None
+                                    files = await self.loop.run_in_executor(
+                                        None, self.file_mgr.list_dir, parent
+                                    )
+                                    resp = json.dumps({"files": files, "path": parent}).encode("utf-8")
+                                    self._send_async(protocol.OP_FM_DATA, resp)
+                                else:
+                                    self._upload_file.write(payload)
+                            except Exception as e:
+                                print(f"[-] FM Chunk Write Error: {e}")
+                                if self._upload_file:
+                                    try:
+                                        self._upload_file.close()
+                                    except Exception:
+                                        pass
                                 self._upload_file = None
                                 self._upload_path = None
-                                files = await self.loop.run_in_executor(
-                                    None, self.file_mgr.list_dir, parent
-                                )
-                                resp = json.dumps({"files": files, "path": parent}).encode("utf-8")
-                                self._send_async(protocol.OP_FM_DATA, resp)
-                            else:
-                                self._upload_file.write(payload)
-                        except Exception as e:
-                            print(f"[-] FM Chunk Write Error: {e}")
-                            if self._upload_file:
-                                try:
-                                    self._upload_file.close()
-                                except Exception:
-                                    pass
-                            self._upload_file = None
-                            self._upload_path = None
 
                 elif opcode == protocol.OP_FM_DELETE:
                     try:
@@ -1506,8 +1523,8 @@ class AsyncAgent:
                                         self._send_async(protocol.OP_ERROR, b"FM: Safety Mode On but Base Dir not configured")
                                         return
 
-                                    base = os.path.abspath(os.path.normpath(self.file_mgr.base_dir))
-                                    real = os.path.abspath(os.path.normpath(path))
+                                    base = os.path.realpath(self.file_mgr.base_dir)
+                                    real = os.path.realpath(path)
                                     
                                     # Drive Check (Windows)
                                     if os.name == 'nt' and os.path.splitdrive(real)[0].lower() != os.path.splitdrive(base)[0].lower():
@@ -1524,15 +1541,21 @@ class AsyncAgent:
                                         self._send_async(protocol.OP_ERROR, msg.encode())
                                         return
 
-                                    # Perform Delete (No pre-check to avoid TOCTOU)
-                                    await self.loop.run_in_executor(
-                                        None, self.file_mgr.delete, path
-                                    )
-
                                 except Exception as e:
                                     print(f"[-] Delete/Validation Error: {e}")
                                     self._send_async(protocol.OP_ERROR, f"Delete failed: {e}".encode())
                                     return
+
+                            # Perform Delete (Outside safety block, handled for all)
+                            try:
+                                await self.loop.run_in_executor(
+                                    None, self.file_mgr.delete, path
+                                )
+                            except Exception as e:
+                                print(f"[-] Delete Execution Error: {e}")
+                                self._send_async(protocol.OP_ERROR, f"Delete failed: {e}".encode())
+                                return
+
                             # Refresh
                             parent = os.path.dirname(path)
                             # Fix: list_files -> list_dir
