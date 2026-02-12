@@ -1430,10 +1430,20 @@ class AsyncAgent:
                             # Security Check
                             if self.file_mgr.safety_mode:
                                 try:
-                                    real = os.path.realpath(path)
-                                    base = os.path.realpath(self.file_mgr.base_dir or os.getcwd())
-                                    containment = os.path.commonpath([base, real]) == base
-                                    if ".." in path or not containment:
+                                    if not self.file_mgr.base_dir:
+                                        self._send_async(protocol.OP_ERROR, b"FM: Safety Mode On but Base Dir not configured")
+                                        return
+
+                                    base = os.path.abspath(os.path.normpath(self.file_mgr.base_dir))
+                                    real = os.path.abspath(os.path.normpath(path))
+                                    
+                                    try:
+                                        containment = os.path.commonpath([base, real]) == base
+                                    except ValueError:
+                                        # Different drives or mix of relative/absolute
+                                        containment = False
+
+                                    if not containment:
                                         msg = f"FM: Upload Path rejected (Safety Mode): {path}"
                                         print(f"[-] {msg}")
                                         self._send_async(protocol.OP_ERROR, msg.encode())
@@ -1492,20 +1502,37 @@ class AsyncAgent:
                             # Security Check
                             if self.file_mgr.safety_mode:
                                 try:
-                                    real = os.path.realpath(path)
-                                    base = os.path.realpath(self.file_mgr.base_dir or os.getcwd())
-                                    containment = os.path.commonpath([base, real]) == base
-                                    if ".." in path or not os.path.exists(real) or not containment:
-                                        self._send_async(protocol.OP_ERROR, b"FM: Path rejected (Safety Mode)")
+                                    if not self.file_mgr.base_dir:
+                                        self._send_async(protocol.OP_ERROR, b"FM: Safety Mode On but Base Dir not configured")
                                         return
-                                except Exception as e:
-                                    print(f"[-] Path Validation Error: {e}")
-                                    return
 
-                            # Fix: delete_item -> delete
-                            await self.loop.run_in_executor(
-                                None, self.file_mgr.delete, path
-                            )
+                                    base = os.path.abspath(os.path.normpath(self.file_mgr.base_dir))
+                                    real = os.path.abspath(os.path.normpath(path))
+                                    
+                                    # Drive Check (Windows)
+                                    if os.name == 'nt' and os.path.splitdrive(real)[0].lower() != os.path.splitdrive(base)[0].lower():
+                                         containment = False
+                                    else:
+                                        try:
+                                            containment = os.path.commonpath([base, real]) == base
+                                        except ValueError:
+                                            containment = False
+
+                                    if not containment:
+                                        msg = f"FM: Delete Path rejected (Safety Mode): {path}"
+                                        print(f"[-] {msg}")
+                                        self._send_async(protocol.OP_ERROR, msg.encode())
+                                        return
+
+                                    # Perform Delete (No pre-check to avoid TOCTOU)
+                                    await self.loop.run_in_executor(
+                                        None, self.file_mgr.delete, path
+                                    )
+
+                                except Exception as e:
+                                    print(f"[-] Delete/Validation Error: {e}")
+                                    self._send_async(protocol.OP_ERROR, f"Delete failed: {e}".encode())
+                                    return
                             # Refresh
                             parent = os.path.dirname(path)
                             # Fix: list_files -> list_dir
