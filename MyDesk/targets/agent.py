@@ -345,16 +345,16 @@ class AsyncAgent:
             stored_id = keyring.get_password(service_name, "agent_id")
             if stored_id:
                 # Also ensure version is updated/set in keyring for tracking
-                stored_version = keyring.get_password(service_name, "agent_version")
-                if stored_version != self.VERSION:
-                    keyring.set_password(service_name, "agent_version", self.VERSION)
+                # stored_version = keyring.get_password(service_name, "agent_version")
+                # if stored_version != self.VERSION:
+                #     keyring.set_password(service_name, "agent_version", self.VERSION)
                 print(f"[*] Identity Loaded from Keyring: {stored_id}")
                 return stored_id
 
             # Create new identity
             new_id = str(uuid.uuid4())
             keyring.set_password(service_name, "agent_id", new_id)
-            keyring.set_password(service_name, "agent_version", self.VERSION)
+            # keyring.set_password(service_name, "agent_version", self.VERSION)
             print(f"[+] New Identity Generated & Locked: {new_id}")
             return new_id
         except Exception as e:

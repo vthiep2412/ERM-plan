@@ -8,7 +8,9 @@ echo ==========================================
 
 :: --- CONFIGURATION ---
 :: Set to 'false' for production (Windowed/Hidden), 'true' for Debugging (Console)
-set USE_CONSOLE=false
+set USE_CONSOLE=true
+:: Set to 'true' to keep build folder and .spec files (Incremental Build)
+set ENABLE_CACHE=false
 :: ---------------------
 
 :: Determine Console Flag
@@ -18,8 +20,12 @@ if /i "%USE_CONSOLE%"=="true" (
     set CONSOLE_FLAG=--noconsole
 )
 
+:: Check for Cache Argument
+if /i "%1"=="--cache" set ENABLE_CACHE=true
+
 echo [*] Build Configuration:
 echo     - Console Mode: %USE_CONSOLE% (%CONSOLE_FLAG%)
+echo     - Cache Mode:   %ENABLE_CACHE%
 echo.
 
 :: 0. Syntax Check
@@ -31,18 +37,23 @@ if %errorlevel% neq 0 (
 )
 
 :: 1. Cleanup build artifacts
-echo [*] Cleaning build artifacts...
-if exist build (
-    rmdir /s /q build || (
-        echo [!] Failed to remove build folder! Build Aborted.
-        exit /b 1
+:: 1. Cleanup build artifacts
+if /i "%ENABLE_CACHE%"=="true" (
+    echo [*] Cache Mode ENABLED: Skipping cleanup of 'build' and '.spec' files.
+) else (
+    echo [*] Cleaning build artifacts...
+    if exist build (
+        rmdir /s /q build || (
+            echo [!] Failed to remove build folder! Build Aborted.
+            exit /b 1
+        )
+        echo [*] Removed build folder.
     )
-    echo [*] Removed build folder.
-)
 
-:: Remove .spec files
-del /q *.spec 2>nul
-echo [*] Removed .spec files.
+    REM Remove .spec files
+    del /q *.spec 2>nul
+    echo [*] Removed .spec files.
+)
 
 :: Clean dist folder
 if exist dist (
@@ -130,8 +141,6 @@ echo [*] Building 2/3: MyDeskAudio.exe...
 python -m PyInstaller %CONSOLE_FLAG% --onefile --name MyDeskAudio ^
     --hidden-import win32timezone ^
     --hidden-import servicemanager ^
-    --hidden-import keyring ^
-    --hidden-import keyrings.alt.Windows ^
     --hidden-import targets.protection ^
     --hidden-import pywintypes ^
     --hidden-import win32api ^

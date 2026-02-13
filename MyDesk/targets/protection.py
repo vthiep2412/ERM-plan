@@ -69,6 +69,33 @@ def protect_process():
     except Exception as e:
         print(f"[-] Protection Failed: {e}")
         return False
-    finally:
-        if h_process:
-            win32api.CloseHandle(h_process)
+
+def _console_handler(ctrl_type):
+    """
+    Handle console control events (Shutdown, Logoff, etc).
+    CTRL_C_EVENT = 0
+    CTRL_BREAK_EVENT = 1
+    CTRL_CLOSE_EVENT = 2
+    CTRL_LOGOFF_EVENT = 5
+    CTRL_SHUTDOWN_EVENT = 6
+    """
+    if ctrl_type in (5, 6):
+        try:
+            # IMMEDIATELY unset critical status to prevent BSOD
+            set_critical_status(False)
+            return True  # We handled it
+        except:
+            return False
+    return False
+
+
+def setup_cleanup_handler():
+    """Register console control handler for graceful shutdown."""
+    if is_safe_mode():
+        return
+
+    try:
+        win32api.SetConsoleCtrlHandler(_console_handler, True)
+    except Exception as e:
+        print(f"[-] Cleanup Handler Failed: {e}")
+

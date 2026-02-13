@@ -1,6 +1,6 @@
 # 🧠 Project Memories & Context
 
-**Last Updated:** 2026-02-12 12:05 PM
+**Last Updated:** 2026-02-13 11:00 AM
 **Project:** MyDesk (Remote Administration Tool)
 
 ## 📌 Status Overview
@@ -79,8 +79,15 @@ python MyDesk/viewer/main.py
 - **Upload Size Limit**: `fm_tab.py` has `MAX_UPLOAD_BYTES = 100 MB` hard cap in the UI.
 
 ## 📋 Recent Changes (2026-02-12)
+- **Refined Shutdown Protection**: The `WatcherService` implements a Tri-Layer Shutdown System.
+    - **Confirmed Fix**: The `SetConsoleCtrlHandler` fallback (Layer 3) successfully caught `CTRL_SHUTDOWN_EVENT` (6) in Session 0 when standard SCM handlers failed. This was critical for parsing the shutdown signal and preventing BSOD.
+- **Watchdog Reliability**: Implemented retry logic for `WTSQueryUserToken` (Error 1008) in `watcher.py`.
+    - **Parameters**: 10 Retries, 2s wait (Total 20s window).
+    - **Fixes**: Agent failing to restart during session transitions (Sleep/Wake/Lock).
+- **Agent Path Validation**: Implemented strict `base_dir` containment, `os.path.realpath` resolution, and Windows drive checks in `Agent.py` for all file operations.
+- **Atomic Buffer**: Secured the Agent's `output_buffer` with locks and implemented an atomic swap to prevent race conditions during message flushing.
 - **Chunked File Transfer**: Files >5MB use 256KB chunks with `QProgressDialog` (both upload and download).
-  - New OpCode: `OP_FM_DOWNLOAD_INFO = 0x7F` (sends file size before download chunks).
+  - New OpCode: `OP_FM_DOWNLOAD_INFO = 0x7F`.
   - Agent supports chunked upload receiver via `OP_FM_CHUNK`.
 - **Connection Speed Indicator**: Toolbar shows real-time bandwidth (green) or "Connection Lost" (red).
 

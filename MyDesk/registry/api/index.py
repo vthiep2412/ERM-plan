@@ -53,7 +53,7 @@ def get_agent():
     """Redirect to the latest Agent executable."""
     # This URL should be set in Vercel Environment Variables
     # Fallback to hardcoded MediaFire link if Env Var is missing
-    hardcoded_agent = "https://download1527.mediafire.com/okb9jd5jzwagjdio7vO35VR-XZFSmjez7hoUBQqhgPCtl3RqlenQltaw5CTiHd57FKOtiegI8Nlhfj_iWtLNutj5jJ10LKiFDt4GmS8E5xIBRurkUTppn0M1XTGRjXHUM0esvl1_dZVfS2cB9gCvVy6TrsOhSAQ0H-bmmwHLt1MA/75r37imtdkekos2/MyDeskAgent.exe"
+    hardcoded_agent = "https://download1334.mediafire.com/gfjnvj7iqnogj0qm9c_sJO5UJgn8Qz1u0uVg9-8HNxbFUOe4D0FKC6yTd4TvagVrX4fn4qxh5M4Eykd0kMXu8Xov9PonFBMAU2tvJJG2AbjG6CVouoBpKtKoC87ZZXK8g_5-jCVCjgQH1dh2AkXXLAbIMONdCCVjHCKkSscRjiTFDnc/n5yz0ejbr4o4y4x/MyDeskAgent.exe"
     download_url = os.environ.get("AGENT_DOWNLOAD_URL") or hardcoded_agent
     return redirect(download_url, code=302)
 

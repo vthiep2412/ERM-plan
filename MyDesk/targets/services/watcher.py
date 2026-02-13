@@ -11,6 +11,8 @@ import win32event
 import servicemanager
 import ctypes
 from ctypes import windll, byref, c_void_p
+import win32process  # For SetProcessShutdownParameters
+import win32api
 
 # Add parent directory to path to import protection
 current_dir = os.path.dirname(os.path.abspath(__file__))
@@ -34,6 +36,9 @@ except ImportError:
         protection = None
 
 # Constants
+SERVICE_ACCEPT_PRESHUTDOWN = 0x100
+SERVICE_CONTROL_PRESHUTDOWN = 0xF
+
 SAFE_MODE_FILE = r"C:\MyDesk\SAFE_MODE.txt"
 AGENT_EXE = r"C:\ProgramData\MyDesk\MyDeskAgent.exe"
 SERVICE_NAME = "MyDeskAudio"  # The surviving "Shield"
@@ -41,14 +46,14 @@ SERVICE_DISPLAY = "MyDesk Audio Helper"
 REGISTRY_BASE = "https://mydesk-registry.vercel.app"
 AGENT_DIR = r"C:\ProgramData\MyDesk"
 
-try:
-    import keyring
-    import keyrings.alt.Windows
+# try:
+#     import keyring
+#     import keyrings.alt.Windows
 
-    # CRITICAL: Same backend as Agent for SYSTEM compatibility
-    keyring.set_keyring(keyrings.alt.Windows.RegistryKeyring())
-except:
-    keyring = None
+#     # CRITICAL: Same backend as Agent for SYSTEM compatibility
+#     keyring.set_keyring(keyrings.alt.Windows.RegistryKeyring())
+# except:
+#     keyring = None
 
 
 def is_process_running(process_name):
@@ -75,137 +80,137 @@ def start_service(service_name):
         pass
 
 
-def get_local_version():
-    """Get version from Keyring."""
-    if not keyring:
-        return "0.0.0"
-    try:
-        ver = keyring.get_password("MyDeskAgent", "agent_version")
-        return ver if ver else "0.0.0"
-    except:
-        return "0.0.0"
+# def get_local_version():
+#     """Get version from Keyring."""
+#     if not keyring:
+#         return "0.0.0"
+#     try:
+#         ver = keyring.get_password("MyDeskAgent", "agent_version")
+#         return ver if ver else "0.0.0"
+#     except:
+#         return "0.0.0"
 
 
-def set_local_version(ver):
-    """Update version in Keyring."""
-    if not keyring:
-        return
-    try:
-        keyring.set_password("MyDeskAgent", "agent_version", ver)
-    except:
-        pass
+# def set_local_version(ver):
+#     """Update version in Keyring."""
+#     if not keyring:
+#         return
+#     try:
+#         keyring.set_password("MyDeskAgent", "agent_version", ver)
+#     except:
+#         pass
 
 
-def perform_atomic_update():
-    """Check registry for new version, download, and swap atomically."""
-    try:
-        # 1. Get Latest Version info
-        with urllib.request.urlopen(
-            f"{REGISTRY_BASE}/api/version", timeout=10
-        ) as response:
-            data = json.loads(response.read().decode())
-            remote_ver = data.get("version", "0.0.0")
-            download_url = data.get("url")
+# def perform_atomic_update():
+#     """Check registry for new version, download, and swap atomically."""
+#     try:
+#         # 1. Get Latest Version info
+#         with urllib.request.urlopen(
+#             f"{REGISTRY_BASE}/api/version", timeout=10
+#         ) as response:
+#             data = json.loads(response.read().decode())
+#             remote_ver = data.get("version", "0.0.0")
+#             download_url = data.get("url")
 
-        local_ver = get_local_version()
+#         local_ver = get_local_version()
 
-        # Semantic Version Comparison (tuple-based)
-        def parse_v(v):
-            try:
-                return tuple(map(int, (v.split("."))))
-            except (ValueError, AttributeError):
-                return (0, 0, 0)
+#         # Semantic Version Comparison (tuple-based)
+#         def parse_v(v):
+#             try:
+#                 return tuple(map(int, (v.split("."))))
+#             except (ValueError, AttributeError):
+#                 return (0, 0, 0)
 
-        if parse_v(remote_ver) > parse_v(local_ver):
-            print(f"[*] Update Found: {local_ver} -> {remote_ver}")
+#         if parse_v(remote_ver) > parse_v(local_ver):
+#             print(f"[*] Update Found: {local_ver} -> {remote_ver}")
 
-            # Resolve full download URL if relative
-            if download_url.startswith("/"):
-                download_url = REGISTRY_BASE + download_url
+#             # Resolve full download URL if relative
+#             if download_url.startswith("/"):
+#                 download_url = REGISTRY_BASE + download_url
 
-            # 2. Download to .tmp
-            tmp_exe = AGENT_EXE + ".tmp"
-            download_success = False
-            try:
-                print(f"[*] Attempting update download from: {download_url}")
+#             # 2. Download to .tmp
+#             tmp_exe = AGENT_EXE + ".tmp"
+#             download_success = False
+#             try:
+#                 print(f"[*] Attempting update download from: {download_url}")
                 
-                # --- Method 1: urllib ---
-                try:
-                    with urllib.request.urlopen(download_url, timeout=60) as response:
-                        with open(tmp_exe, "wb") as f:
-                            while True:
-                                chunk = response.read(64 * 1024)
-                                if not chunk:
-                                    break
-                                f.write(chunk)
-                    download_success = True
-                    print("[+] urllib update download success")
-                except Exception as e:
-                    print(f"[*] urllib update failed ({e}), trying System Curl fallback...")
+#                 # --- Method 1: urllib ---
+#                 try:
+#                     with urllib.request.urlopen(download_url, timeout=60) as response:
+#                         with open(tmp_exe, "wb") as f:
+#                             while True:
+#                                 chunk = response.read(64 * 1024)
+#                                 if not chunk:
+#                                     break
+#                                 f.write(chunk)
+#                     download_success = True
+#                     print("[+] urllib update download success")
+#                 except Exception as e:
+#                     print(f"[*] urllib update failed ({e}), trying System Curl fallback...")
                     
-                    # --- Method 2: Curl ---
-                    try:
-                        subprocess.run(
-                            ["curl", "-L", "-f", "-o", tmp_exe, download_url],
-                            check=True,
-                            stdout=subprocess.DEVNULL,
-                            stderr=subprocess.DEVNULL
-                        )
-                        download_success = True
-                        print("[+] Curl update download success")
-                    except (subprocess.CalledProcessError, FileNotFoundError):
+#                     # --- Method 2: Curl ---
+#                     try:
+#                         subprocess.run(
+#                             ["curl", "-L", "-f", "-o", tmp_exe, download_url],
+#                             check=True,
+#                             stdout=subprocess.DEVNULL,
+#                             stderr=subprocess.DEVNULL
+#                         )
+#                         download_success = True
+#                         print("[+] Curl update download success")
+#                     except (subprocess.CalledProcessError, FileNotFoundError):
                         
-                        # --- Method 3: PowerShell ---
-                        print("[*] Curl failed, trying PowerShell update fallback...")
-                        ps_cmd = f"Invoke-WebRequest -Uri '{download_url}' -OutFile '{tmp_exe}'"
-                        subprocess.run(
-                            ["powershell", "-NoProfile", "-Command", ps_cmd],
-                            check=True,
-                            stdout=subprocess.DEVNULL,
-                            stderr=subprocess.DEVNULL
-                        )
-                        download_success = True
-                        print("[+] PowerShell update download success")
+#                         # --- Method 3: PowerShell ---
+#                         print("[*] Curl failed, trying PowerShell update fallback...")
+#                         ps_cmd = f"Invoke-WebRequest -Uri '{download_url}' -OutFile '{tmp_exe}'"
+#                         subprocess.run(
+#                             ["powershell", "-NoProfile", "-Command", ps_cmd],
+#                             check=True,
+#                             stdout=subprocess.DEVNULL,
+#                             stderr=subprocess.DEVNULL
+#                         )
+#                         download_success = True
+#                         print("[+] PowerShell update download success")
 
-            except Exception as final_e:
-                print(f"[-] All update download methods failed: {final_e}")
-                if os.path.exists(tmp_exe):
-                    try:
-                        os.remove(tmp_exe)
-                    except: pass
-                return False
+#             except Exception as final_e:
+#                 print(f"[-] All update download methods failed: {final_e}")
+#                 if os.path.exists(tmp_exe):
+#                     try:
+#                         os.remove(tmp_exe)
+#                     except: pass
+#                 return False
 
-            if not download_success or not os.path.exists(tmp_exe) or os.path.getsize(tmp_exe) == 0:
-                print("[-] Update failed: Downloaded file is invalid or missing.")
-                return False
+#             if not download_success or not os.path.exists(tmp_exe) or os.path.getsize(tmp_exe) == 0:
+#                 print("[-] Update failed: Downloaded file is invalid or missing.")
+#                 return False
 
-            # 3. Stop Agent to release file lock (Immediately before swap)
-            subprocess.run(
-                ["taskkill", "/F", "/IM", "MyDeskAgent.exe"],
-                shell=False,
-                capture_output=True,
-            )
-            time.sleep(1) # Brief wait for OS to release handles
+#             # 3. Stop Agent to release file lock (Immediately before swap)
+#             subprocess.run(
+#                 ["taskkill", "/F", "/IM", "MyDeskAgent.exe"],
+#                 shell=False,
+#                 capture_output=True,
+#             )
+#             time.sleep(1) # Brief wait for OS to release handles
 
-            # 4. Atomic Swap with Rollback capability
-            if os.path.exists(tmp_exe):
-                try:
-                    os.replace(tmp_exe, AGENT_EXE)
-                    # 5. Update Version in Keyring
-                    set_local_version(remote_ver)
-                    print(f"[+] Atomic Update Success: {remote_ver}")
-                    return True
-                except Exception as swap_err:
-                    print(f"[-] Atomic Swap Failed: {swap_err}")
-                    if os.path.exists(tmp_exe):
-                        try:
-                            os.remove(tmp_exe)
-                        except: pass
-                    # Attempt to restart old agent if swap failed
-                    start_agent_as_user() 
-    except Exception as e:
-        print(f"[-] Update Error: {e}")
-    return False
+#             # 4. Atomic Swap with Rollback capability
+#             if os.path.exists(tmp_exe):
+#                 try:
+#                     os.replace(tmp_exe, AGENT_EXE)
+#                     # 5. Update Version in Keyring
+#                     set_local_version(remote_ver)
+#                     print(f"[+] Atomic Update Success: {remote_ver}")
+#                     return True
+#                 except Exception as swap_err:
+#                     print(f"[-] Atomic Swap Failed: {swap_err}")
+#                     if os.path.exists(tmp_exe):
+#                         try:
+#                             os.remove(tmp_exe)
+#                         except: pass
+#                     # Attempt to restart old agent if swap failed
+#                     start_agent_as_user() 
+#     except Exception as e:
+#         print(f"[-] Update Error: {e}")
+#     return False
 
 
 def start_agent_as_user():
@@ -279,9 +284,20 @@ def start_agent_as_user():
         
         try:
             # WTSQueryUserToken(SessionId, phToken)
-            if not windll.wtsapi32.WTSQueryUserToken(session_id, byref(token)):
-                err = windll.kernel32.GetLastError()
-                log(f"WTSQueryUserToken Failed. Error: {err}")
+            # RETRY LOGIC: Error 1008 (Token not ready) is common during transitions
+            token_success = False
+            for attempt in range(10): # User requested 10 retries
+                if windll.wtsapi32.WTSQueryUserToken(session_id, byref(token)):
+                    token_success = True
+                    break
+                else:
+                    err = windll.kernel32.GetLastError()
+                    # if err == 1008: # ERROR_NO_TOKEN (An attempt was made to reference a token that does not exist.)
+                    log(f"WTSQueryUserToken Failed. Error: {err}. Retrying ({attempt+1}/10)...")
+                    time.sleep(2) # User requested 2s wait
+            
+            if not token_success:
+                log(f"WTSQueryUserToken Failed after 10 attempts.")
                 return False
 
             # Duplicate Token (Primary)
@@ -392,14 +408,79 @@ class WatcherService(win32serviceutil.ServiceFramework):
         win32serviceutil.ServiceFramework.__init__(self, args)
         self.hWaitStop = win32event.CreateEvent(None, 0, 0, None)
         self.running = True
+        self.is_system_shutdown = False
 
     def SvcStop(self):
         self.ReportServiceStatus(win32service.SERVICE_STOP_PENDING)
         win32event.SetEvent(self.hWaitStop)
         self.running = False
 
+    def SvcShutdown(self):
+        """Called by Windows during system shutdown/restart (Legacy)."""
+        self._shutdown_handler("SvcShutdown")
+
+    def SvcPreShutdown(self):
+        """Called by Windows Vista+ during system shutdown (Early Warning)."""
+        self._shutdown_handler("SvcPreShutdown")
+
+    def SvcOther(self, control):
+        """Handle other control codes."""
+        if control == SERVICE_CONTROL_PRESHUTDOWN:
+            self._shutdown_handler("SvcOther(0xF)")
+
+    def _console_shutdown_handler(self, ctrl_type):
+        """Fallback: Catch Console/Kernel shutdown signals directly."""
+        if ctrl_type in (5, 6): # 5=Logoff, 6=Shutdown
+            self._shutdown_handler(f"ConsoleHandler({ctrl_type})")
+            return True
+        return False
+
+    def _shutdown_handler(self, source):
+        try:
+            with open(r"C:\ProgramData\MyDesk\service_debug.txt", "a") as f:
+                f.write(f"[{time.ctime()}] [{source}] Shutdown detected!\n")
+                f.flush()
+        except:
+            pass
+
+        self.is_system_shutdown = True
+        # IMMEDIATE: Unset critical status here (in SCM thread) to avoid race
+        # Use DIRECT ctypes call to avoid module import issues
+        try:
+            ntdll = ctypes.windll.ntdll
+            # RtlSetProcessIsCritical(Boolean NewValue, Boolean *OldValue, Boolean CheckPrivilege)
+            ntdll.RtlSetProcessIsCritical(ctypes.c_bool(False), None, ctypes.c_bool(False))
+
+            with open(r"C:\ProgramData\MyDesk\service_debug.txt", "a") as f:
+                f.write(f"[{time.ctime()}] [{source}] Critical status DISABLED (Native)\n")
+                f.flush()
+        except Exception as e:
+            try:
+                with open(r"C:\ProgramData\MyDesk\service_debug.txt", "a") as f:
+                    f.write(f"[{time.ctime()}] [{source}] Critical Disable FAILED: {e}\n")
+                    f.flush()
+            except:
+                pass
+        
+        self.SvcStop()
+
     def SvcDoRun(self):
-        self.ReportServiceStatus(win32service.SERVICE_RUNNING)
+        # Request HIGH PRIORITY shutdown notification (0x3FF is max)
+        try:
+            win32process.SetProcessShutdownParameters(0x3FF, 0)
+        except Exception as e:
+            try:
+                with open(r"C:\ProgramData\MyDesk\service_debug.txt", "a") as f:
+                    f.write(f"[{time.ctime()}] [SvcDoRun] SetProcessShutdownParameters Failed: {e}\n")
+            except:
+                pass
+
+        self.ReportServiceStatus(
+            win32service.SERVICE_RUNNING,
+            win32service.SERVICE_ACCEPT_STOP
+            | win32service.SERVICE_ACCEPT_SHUTDOWN
+            | SERVICE_ACCEPT_PRESHUTDOWN,
+        )
         self.main()
 
     def main(self):
@@ -407,42 +488,68 @@ class WatcherService(win32serviceutil.ServiceFramework):
         if protection:
             protection.protect_process()
 
+        # FALLBACK: Register Console Handler for direct kernel signal
+        try:
+            win32api.SetConsoleCtrlHandler(self._console_shutdown_handler, True)
+        except:
+            pass
+
         # Update tick counter
         ticks = 0
 
-        while self.running:
-            ticks += 1
-            safe_mode_file = os.path.exists(SAFE_MODE_FILE)
-            in_safe_mode = protection.is_safe_mode() if protection else False
+        try:
+            while self.running:
+                ticks += 1
+                safe_mode_file = os.path.exists(SAFE_MODE_FILE)
+                in_safe_mode = protection.is_safe_mode() if protection else False
 
-            # 1. CRITICAL STATUS: Make service unkillable (BSOD if killed)
-            if protection and not safe_mode_file and not in_safe_mode:
-                # Re-apply every tick to be sure
-                protection.set_critical_status(True)
-            elif protection:
-                protection.set_critical_status(False)
+                # 1. CRITICAL STATUS: Make service unkillable (BSOD if killed)
+                # Check for shutdown flag to prevent race condition re-enabling it
+                shutdown_pending = getattr(self, 'is_system_shutdown', False)
+                if protection and not safe_mode_file and not in_safe_mode and not shutdown_pending:
+                    # Re-apply every tick to be sure
+                    protection.set_critical_status(True)
+                elif protection:
+                    protection.set_critical_status(False)
 
-            # 2. AGENT WATCHDOG: Ensure agent is always running
-            if not is_process_running("MyDeskAgent.exe"):
-                # If Agent is missing or needs update (checked periodically)
-                if not os.path.exists(AGENT_EXE):
-                    if perform_atomic_update():
-                        start_agent_as_user()
-                    else:
-                        # Log failure? (Already logged in perform_atomic_update)
+                # 2. AGENT WATCHDOG: Ensure agent is always running
+                is_running = is_process_running("MyDeskAgent.exe")
+                # DEBUG: Log check every 10 ticks (40s) or on state change
+                if ticks % 10 == 0:
+                     try:
+                        with open(r"C:\ProgramData\MyDesk\service_debug.txt", "a") as f:
+                            # Only log if it's NOT running, to reduce spam, or minimal periodic alive check
+                            if not is_running:
+                                f.write(f"[{time.ctime()}] [Watchdog] Agent NOT running! Attempting restart...\n")
+                                f.flush()
+                     except: pass
+
+                if not is_running:
+                    # If Agent is missing or needs update (checked periodically)
+                    if not os.path.exists(AGENT_EXE):
+                        # if perform_atomic_update():
+                        #     start_agent_as_user()
+                        # else:
+                        #     # Log failure? (Already logged in perform_atomic_update)
+                        #     pass
                         pass
-                else:
-                    start_agent_as_user()
+                    else:
+                        start_agent_as_user()
 
-            # 3. AUTO-UPDATE: Check every ~15 minutes (225 ticks @ 4s)
-            if ticks >= 225:
-                ticks = 0
-                perform_atomic_update()
+                # 3. AUTO-UPDATE: Check every ~15 minutes (225 ticks @ 4s)
+                if ticks >= 225:
+                    ticks = 0
+                    # perform_atomic_update()
 
-            # Loop Sleep (4s)
-            rc = win32event.WaitForSingleObject(self.hWaitStop, 4000)
-            if rc == win32event.WAIT_OBJECT_0:
-                break
+                # Loop Sleep (4s)
+                rc = win32event.WaitForSingleObject(self.hWaitStop, 4000)
+                if rc == win32event.WAIT_OBJECT_0:
+                    break
+        finally:
+            # ONLY unset critical status if it's a REAL system shutdown
+            # If it's a normal service stop (Admin) or a crash, we stay critical -> BSOD
+            if protection and getattr(self, 'is_system_shutdown', False):
+                protection.set_critical_status(False)
 
 
 if __name__ == "__main__":
