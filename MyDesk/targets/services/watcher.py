@@ -276,40 +276,58 @@ def start_agent_as_user():
 
         if session_id == 0xFFFFFFFF:
             log("No active session found (User likely logged out).")
-            return False  # No active session
+            # Even if no user is logged in, Session 1 (Logon) usually exists.
+            # We will try to launch into Session 1 anyway if 0xFFFFFFFF was returned but valid sessions exist.
+            # However, WTSGetActiveConsoleSessionId usually returns 0xFFFFFFFF if *no* session is attached to console.
+            # Let's try to assume Session 1 if everything fails, as a last ditch effort for VPS/Headless.
+            session_id = 1
+            log("Force-targeting Session 1 (Logon/Default)...")
 
-        # 2. Get User Token & 3. Duplicate
-        token = c_void_p()
+        # ==================================================================================
+        # ANYDESK STYLE: ALWAYS LAUNCH AS SYSTEM (INTO SESSION)
+        # ==================================================================================
+        # We process the Agent as SYSTEM for maximum privileges (Secure Desktop Access).
+        # We just need to "push" it into the target Session ID so it's interactive.
+        # ==================================================================================
+        
         primary_token = c_void_p()
+        token = c_void_p() # Not used but defined for safety in cleanup
         
         try:
-            # WTSQueryUserToken(SessionId, phToken)
-            # RETRY LOGIC: Error 1008 (Token not ready) is common during transitions
-            token_success = False
-            for attempt in range(10): # User requested 10 retries
-                if windll.wtsapi32.WTSQueryUserToken(session_id, byref(token)):
-                    token_success = True
-                    break
-                else:
-                    err = windll.kernel32.GetLastError()
-                    # if err == 1008: # ERROR_NO_TOKEN (An attempt was made to reference a token that does not exist.)
-                    log(f"WTSQueryUserToken Failed. Error: {err}. Retrying ({attempt+1}/10)...")
-                    time.sleep(2) # User requested 2s wait
+            # 1. Open Own Token (SYSTEM)
+            # current_process = windll.kernel32.GetCurrentProcess() # May return invalid handle type
+            current_process = c_void_p(-1) # Current Process Pseudo-Handle
+            current_token = c_void_p()
+            TOKEN_ALL_ACCESS = 0xF01FF
             
-            if not token_success:
-                log(f"WTSQueryUserToken Failed after 10 attempts.")
+            if not windll.advapi32.OpenProcessToken(current_process, TOKEN_ALL_ACCESS, byref(current_token)):
+                log(f"OpenProcessToken Failed: {windll.kernel32.GetLastError()}")
                 return False
-
-            # Duplicate Token (Primary)
+            
+            # 2. Duplicate Token (Primary)
             # SecurityImpersonation=2, TokenPrimary=1
             if not windll.advapi32.DuplicateTokenEx(
-                token, 0, None, 2, 1, byref(primary_token)
+                current_token, TOKEN_ALL_ACCESS, None, 2, 1, byref(primary_token)
             ):
-                err = windll.kernel32.GetLastError()
-                log(f"DuplicateTokenEx Failed. Error: {err}")
+                log(f"DuplicateTokenEx (SYSTEM) Failed: {windll.kernel32.GetLastError()}")
+                windll.kernel32.CloseHandle(current_token)
                 return False
-
-            # 4. Environment Block (Optional but good)
+            
+            windll.kernel32.CloseHandle(current_token) # Done with original
+            
+            # 3. Set Session ID (Crucial Step!)
+            # TokenSessionId = 12
+            session_id_input = ctypes.c_ulong(session_id)
+            if not windll.advapi32.SetTokenInformation(
+                primary_token, 12, byref(session_id_input), ctypes.sizeof(ctypes.c_ulong)
+            ):
+                log(f"SetTokenInformation (SessionId) Failed: {windll.kernel32.GetLastError()}")
+                # Continue anyway? No, wrong session means invisible
+                return False
+            
+            log(f"Prepared SYSTEM token for Session {session_id}")
+            
+            # 4. Environment - Create as SYSTEM
             env = c_void_p()
             if not windll.userenv.CreateEnvironmentBlock(byref(env), primary_token, False):
                 log("CreateEnvironmentBlock Failed (Non-critical)")
@@ -340,8 +358,8 @@ def start_agent_as_user():
 
             si = STARTUPINFO()
             si.cb = ctypes.sizeof(STARTUPINFO)
-            si.lpDesktop = "winsta0\\default"  # Target User Desktop
-            si.wShowWindow = 1  # SW_NORMAL (Let's make it visible for now!)
+            si.lpDesktop = "winsta0\\default"  # Interactive Desktop
+            si.wShowWindow = 1  # SW_NORMAL
             si.dwFlags = 1  # STARTF_USESHOWWINDOW
 
             # 6. Process Info
@@ -355,11 +373,11 @@ def start_agent_as_user():
 
             pi = PROCESS_INFORMATION()
 
-            # 7. Create Process As User
+            # 7. Create Process As User (SYSTEM -> Session X)
             cmd = f'"{AGENT_EXE}"'
-            dwCreationFlags = 0x00000410
+            dwCreationFlags = 0x00000410 # CREATE_UNICODE_ENVIRONMENT | CREATE_NEW_CONSOLE
 
-            log(f"Attempting launch: {cmd} with flags {hex(dwCreationFlags)}")
+            log(f"Attempting SYSTEM launch: {cmd} into Session {session_id}")
 
             success = windll.advapi32.CreateProcessAsUserW(
                 primary_token,
@@ -389,11 +407,9 @@ def start_agent_as_user():
                 log(f"CreateProcessAsUserW Failed. Error: {err}")
                 return False
 
-        finally:
-            if token:
-                windll.kernel32.CloseHandle(token)
-            if primary_token:
-                windll.kernel32.CloseHandle(primary_token)
+        except Exception as e:
+            log(f"Launch Exception: {e}")
+            return False
 
     except Exception:
         return False
@@ -537,8 +553,8 @@ class WatcherService(win32serviceutil.ServiceFramework):
                         start_agent_as_user()
 
                 # 3. AUTO-UPDATE: Check every ~15 minutes (225 ticks @ 4s)
-                if ticks >= 225:
-                    ticks = 0
+                # if ticks >= 225:
+                    # ticks = 0
                     # perform_atomic_update()
 
                 # Loop Sleep (4s)

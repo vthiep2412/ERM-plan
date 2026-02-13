@@ -424,27 +424,53 @@ public class Audio {{
         # OS
         info["os"] = f"{platform.system()} {platform.release()} ({platform.version()})"
 
+        # User (Active Console)
+        try:
+            # WTS_CURRENT_SERVER_HANDLE = 0
+            # WTSUserName = 5
+            # WTS_CURRENT_SESSION = -1 (But we want the console session)
+            
+            kernel32 = ctypes.windll.kernel32
+            wtsapi32 = ctypes.windll.wtsapi32
+            
+            # Get Active Console Session ID
+            WTS_CURRENT_SERVER_HANDLE = 0
+            session_id = kernel32.WTSGetActiveConsoleSessionId()
+            
+            if session_id == 0xFFFFFFFF:
+                # No console session?
+                info["user"] = f"{platform.node()} (Service)"
+            else:
+                # Get UserName for that session
+                p_buffer = ctypes.c_void_p()
+                bytes_returned = ctypes.c_ulong()
+                
+                if wtsapi32.WTSQuerySessionInformationW(
+                    WTS_CURRENT_SERVER_HANDLE,
+                    session_id,
+                    5, # WTSUserName
+                    ctypes.byref(p_buffer),
+                    ctypes.byref(bytes_returned)
+                ):
+                    username = ctypes.wstring_at(p_buffer)
+                    wtsapi32.WTSFreeMemory(p_buffer)
+                    
+                    if username:
+                        info["user"] = username
+                    else:
+                        info["user"] = f"{platform.node()} (Login)" # Show Hostname at Login Screen
+                else:
+                    info["user"] = f"{getpass.getuser()} (Fallback)"
+
+        except Exception as e:
+             info["user"] = f"{getpass.getuser()} (Error: {e})"
+
         # CPU
         # Try to get detailed CPU name via PowerShell (WMIC is deprecated)
         try:
-            cpu_name = (
-                subprocess.check_output(
-                    [
-                        "powershell",
-                        "-NoProfile",
-                        "-ExecutionPolicy",
-                        "Bypass",
-                        "-Command",
-                        "(Get-CimInstance Win32_Processor).Name",
-                    ],
-                    creationflags=subprocess.CREATE_NO_WINDOW,
-                )
-                .decode()
-                .strip()
-            )
-        except Exception:
-            # Silent fallback to platform.processor()
             cpu_name = platform.processor()
+        except:
+            cpu_name = "Unknown CPU"
 
         info["cpu"] = cpu_name
         if psutil:

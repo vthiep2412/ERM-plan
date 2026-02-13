@@ -37,7 +37,6 @@ if %errorlevel% neq 0 (
 )
 
 :: 1. Cleanup build artifacts
-:: 1. Cleanup build artifacts
 if /i "%ENABLE_CACHE%"=="true" (
     echo [*] Cache Mode ENABLED: Skipping cleanup of 'build' and '.spec' files.
 ) else (

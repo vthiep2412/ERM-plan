@@ -103,6 +103,40 @@ class DeltaScreenCapturer:
             print("[+] Encoding: GPU (NVENC)")
         else:
             print(f"[+] Encoding: CPU ({self.format})")
+            
+        self.last_desktop_name = None
+
+    def _get_current_desktop_name(self):
+        """Get name of current thread's desktop"""
+        try:
+            user32 = windll.user32
+            h_desktop = user32.GetThreadDesktop(windll.kernel32.GetCurrentThreadId())
+            if not h_desktop:
+                return None
+            
+            # Get length first
+            length_needed = c_long()
+            user32.GetUserObjectInformationW(h_desktop, 2, None, 0, byref(length_needed))
+            
+            # Get name
+            from ctypes import create_unicode_buffer
+            name_buf = create_unicode_buffer(length_needed.value)
+            user32.GetUserObjectInformationW(h_desktop, 2, name_buf, length_needed.value, byref(length_needed))
+            return name_buf.value
+        except Exception:
+            return None
+            
+    def _switch_to_input_desktop(self):
+        """Switch capturing thread to active input desktop (Winlogon/Default)"""
+        try:
+            user32 = windll.user32
+            # 0x01FF = GENERIC_ALL access
+            h_desktop = user32.OpenInputDesktop(0, False, 0x01FF)
+            if h_desktop:
+                user32.SetThreadDesktop(h_desktop)
+                user32.CloseDesktop(h_desktop)
+        except Exception:
+            pass
 
     def __del__(self):
         """Ensure MSS resources are released"""
@@ -236,10 +270,37 @@ class DeltaScreenCapturer:
 
     def _capture_raw(self):
         """Capture raw frame as numpy array"""
+        self._switch_to_input_desktop() # CRITICAL: Switch to active desktop (LogonUI)
+        
+        # Check for Desktop Switch (e.g. User -> Winlogon)
+        current_desktop = self._get_current_desktop_name()
+        if current_desktop and current_desktop != self.last_desktop_name:
+            # print(f"[*] Desktop Switched: {self.last_desktop_name} -> {current_desktop}")
+            self.last_desktop_name = current_desktop
+            
+            # Re-initialize MSS to bind to new Desktop DC
+            if self.sct:
+                try:
+                    self.sct.close()
+                except:
+                    pass
+                try:
+                    # print("[*] Re-initializing MSS for new desktop...")
+                    self.sct = mss.mss()
+                except Exception as e:
+                    print(f"[-] MSS Re-init Failed: {e}")
+
+        # FORCE PIL on Secure Desktop (Winlogon)
+        # MSS GDI seems to capture black on Winlogon even after switch
+        # PIL (ImageGrab) tends to be more robust here.
+        use_mss = True
+        if self.last_desktop_name and "winlogon" in self.last_desktop_name.lower():
+            use_mss = False
+
         img = None
 
         # MSS Capture
-        if self.sct:
+        if self.sct and use_mss:
             try:
                 # Check monitors
                 monitor_idx = 1

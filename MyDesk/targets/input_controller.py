@@ -65,7 +65,40 @@ class InputController:
     # NATIVE INJECTION HELPERS (SendInput)
     # =========================================================================
 
+    def _switch_to_input_desktop(self):
+        """
+        CRITICAL: Switch calling thread to the Active Input Desktop (Default or Winlogon).
+        Required for injecting input into UAC / Logon Screen when running as SYSTEM.
+        """
+        try:
+            user32 = ctypes.windll.user32
+            
+            # 1. Open the active input desktop
+            # DESKTOP_SWITCHDESKTOP | DESKTOP_WRITEOBJECTS | DESKTOP_READOBJECTS | 
+            # DESKTOP_ENUMERATE | DESKTOP_CREATEWINDOW | DESKTOP_CREATEMENU | DESKTOP_HOOKCONTROL
+            ACCESS_FLAGS = 0x01FF 
+            h_desktop = user32.OpenInputDesktop(0, False, ACCESS_FLAGS)
+            
+            if not h_desktop:
+                # If failed, we might already be on it, or access denied (less likely as SYSTEM)
+                # print(f"[-] OpenInputDesktop Failed: {ctypes.GetLastError()}")
+                return
+
+            # 2. Set the current thread to this desktop
+            # This allows SendInput to work on the secure desktop
+            if not user32.SetThreadDesktop(h_desktop):
+                 print(f"[-] SetThreadDesktop Failed: {ctypes.GetLastError()}")
+            
+            # 3. Close the handle (SetThreadDesktop increments ref count, so this is safe)
+            user32.CloseDesktop(h_desktop)
+
+        except Exception as e:
+            print(f"[-] Desktop Switch Error: {e}")
+
     def _send_input(self, input_struct):
+        # Ensure we are targeting the real active desktop (even Secure Desktop)
+        self._switch_to_input_desktop()
+        
         ctypes.windll.user32.SendInput(
             1, ctypes.byref(input_struct), ctypes.sizeof(Input)
         )

