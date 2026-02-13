@@ -6,6 +6,7 @@ import subprocess
 import ctypes
 import json
 import platform
+import getpass
 from datetime import datetime
 
 try:

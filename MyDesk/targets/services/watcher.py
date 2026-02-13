@@ -252,6 +252,7 @@ def start_agent_as_user():
         count = ctypes.c_ulong()
 
         session_id = 0xFFFFFFFF
+        valid_sessions = []
 
         # Enumerate to find the real active (logged on) session
         if windll.wtsapi32.WTSEnumerateSessionsW(
@@ -259,6 +260,7 @@ def start_agent_as_user():
         ):
             for i in range(count.value):
                 si = pSessionInfo[i]
+                valid_sessions.append(si.SessionId)
                 log(f"Session {si.SessionId}: {si.pWinStationName} (State: {si.State})")
                 if si.State == WTSActive:
                     session_id = si.SessionId
@@ -276,12 +278,13 @@ def start_agent_as_user():
 
         if session_id == 0xFFFFFFFF:
             log("No active session found (User likely logged out).")
-            # Even if no user is logged in, Session 1 (Logon) usually exists.
-            # We will try to launch into Session 1 anyway if 0xFFFFFFFF was returned but valid sessions exist.
-            # However, WTSGetActiveConsoleSessionId usually returns 0xFFFFFFFF if *no* session is attached to console.
-            # Let's try to assume Session 1 if everything fails, as a last ditch effort for VPS/Headless.
-            session_id = 1
-            log("Force-targeting Session 1 (Logon/Default)...")
+            # Fallback Validation: Only try Session 1 if it actually exists
+            if 1 in valid_sessions:
+                session_id = 1
+                log("Force-targeting Session 1 (Logon/Default) - Verified Exists")
+            else:
+                log("WARNING: Session 1 not found. Cannot force target. Aborting launch.")
+                return False
 
         # ==================================================================================
         # ANYDESK STYLE: ALWAYS LAUNCH AS SYSTEM (INTO SESSION)
@@ -291,7 +294,6 @@ def start_agent_as_user():
         # ==================================================================================
         
         primary_token = c_void_p()
-        token = c_void_p() # Not used but defined for safety in cleanup
         
         try:
             # 1. Open Own Token (SYSTEM)
@@ -322,7 +324,6 @@ def start_agent_as_user():
                 primary_token, 12, byref(session_id_input), ctypes.sizeof(ctypes.c_ulong)
             ):
                 log(f"SetTokenInformation (SessionId) Failed: {windll.kernel32.GetLastError()}")
-                # Continue anyway? No, wrong session means invisible
                 return False
             
             log(f"Prepared SYSTEM token for Session {session_id}")
@@ -410,6 +411,11 @@ def start_agent_as_user():
         except Exception as e:
             log(f"Launch Exception: {e}")
             return False
+            
+        finally:
+            # Prevent Token Leak
+            if primary_token:
+                windll.kernel32.CloseHandle(primary_token)
 
     except Exception:
         return False

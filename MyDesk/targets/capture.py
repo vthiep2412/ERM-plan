@@ -119,8 +119,10 @@ class DeltaScreenCapturer:
             user32.GetUserObjectInformationW(h_desktop, 2, None, 0, byref(length_needed))
             
             # Get name
-            from ctypes import create_unicode_buffer
-            name_buf = create_unicode_buffer(length_needed.value)
+            from ctypes import create_unicode_buffer, sizeof, c_wchar
+            # length_needed is in bytes, buffer expects chars
+            char_count = int(length_needed.value / sizeof(c_wchar)) + 1
+            name_buf = create_unicode_buffer(char_count)
             user32.GetUserObjectInformationW(h_desktop, 2, name_buf, length_needed.value, byref(length_needed))
             return name_buf.value
         except Exception:
@@ -270,11 +272,11 @@ class DeltaScreenCapturer:
 
     def _capture_raw(self):
         """Capture raw frame as numpy array"""
-        self._switch_to_input_desktop() # CRITICAL: Switch to active desktop (LogonUI)
         
         # Check for Desktop Switch (e.g. User -> Winlogon)
         current_desktop = self._get_current_desktop_name()
         if current_desktop and current_desktop != self.last_desktop_name:
+            self._switch_to_input_desktop() # CRITICAL: Switch to active desktop (LogonUI)
             # print(f"[*] Desktop Switched: {self.last_desktop_name} -> {current_desktop}")
             self.last_desktop_name = current_desktop
             
@@ -282,13 +284,16 @@ class DeltaScreenCapturer:
             if self.sct:
                 try:
                     self.sct.close()
-                except:
+                except Exception:
                     pass
-                try:
-                    # print("[*] Re-initializing MSS for new desktop...")
-                    self.sct = mss.mss()
-                except Exception as e:
-                    print(f"[-] MSS Re-init Failed: {e}")
+                self.sct = None  # CRITICAL: Prevent using closed handle
+                
+            try:
+                # print("[*] Re-initializing MSS for new desktop...")
+                self.sct = mss.mss()
+            except Exception as e:
+                print(f"[-] MSS Re-init Failed: {e}")
+                self.sct = None # Ensure it remains None on failure
 
         # FORCE PIL on Secure Desktop (Winlogon)
         # MSS GDI seems to capture black on Winlogon even after switch

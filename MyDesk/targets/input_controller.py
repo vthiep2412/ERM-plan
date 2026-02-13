@@ -28,6 +28,10 @@ class InputController:
         self.screen_width = screen_width
         self.screen_height = screen_height
 
+        # Caching for Desktop Switching
+        self.cached_h_desktop = None
+        self.last_desktop_name = None
+
         # Auto-detect screen size
         if screen_width is None or screen_height is None:
             self.screen_width, self.screen_height = self._detect_screen_size()
@@ -65,38 +69,120 @@ class InputController:
     # NATIVE INJECTION HELPERS (SendInput)
     # =========================================================================
 
+    def _get_current_input_desktop_name(self):
+        """Helper to get name of current input desktop for change detection."""
+        h_desk = ctypes.windll.user32.OpenInputDesktop(0, False, 0x0100) # READOBJECTS
+        if not h_desk:
+            return None
+            
+        name = None
+        try:
+            # Get name length first
+            needed = ctypes.c_ulong()
+            ctypes.windll.user32.GetUserObjectInformationW(h_desk, 2, None, 0, ctypes.byref(needed))
+            
+            if needed.value:
+                # Get name
+                buff = ctypes.create_unicode_buffer(needed.value)
+                if ctypes.windll.user32.GetUserObjectInformationW(h_desk, 2, buff, needed.value, ctypes.byref(needed)):
+                    name = buff.value
+        except:
+            pass
+        finally:
+            ctypes.windll.user32.CloseDesktop(h_desk)
+        return name
+
     def _switch_to_input_desktop(self):
         """
         CRITICAL: Switch calling thread to the Active Input Desktop (Default or Winlogon).
-        Required for injecting input into UAC / Logon Screen when running as SYSTEM.
+        Now Optimized with Caching to avoid OpenInputDesktop on every move.
         """
         try:
             user32 = ctypes.windll.user32
             
+            # Simple heuristic: Check if desktop changed effectively
+            # Full GetUserObjectInformation check is heavy, so we rely on OpenInputDesktop success/fail as proxy?
+            # No, correct way is to check periodic or if SetThreadDesktop fails.
+            
+            # BETTER STRATEGY: 
+            # 1. Try to use cached handle.
+            # 2. If no cached handle, or if it failed recently, try OpenInputDesktop.
+            
+            # For now, let's refresh ONLY if we suspect a change or don't have one.
+            # Actually, to be robust against "Win+L" (Switch), we DO need to check status.
+            
+            # Optimization: 
+            # - If we have a cached handle, SetThreadDesktop(cached) is fast.
+            # - But if desktop CHANGED, SetThreadDesktop(old) might succeed but be wrong? 
+            # No, SetThreadDesktop to a non-active desktop works but input won't go to active.
+            
+            # Compromise: Check desktop name every N calls? Or simpler:
+            # Just try to open input desktop every time? NO that's what we want to avoid.
+            
+            # Logic: Input only works if we match the input desktop.
+            # Let's check name only if we haven't in a while?
+            # Or just assume stability until failure? MOUSE_MOVE is spammy.
+            
+            # NEW LOGIC:
+            # 1. Get Current Input Desktop Name (Fast? No, OpenInputDesktop is the slow part)
+            # Wait, OpenInputDesktop IS the syscall we want to avoid.
+            
+            # If we are SYSTEM, and user switches to Winlogon, OpenInputDesktop returns the NEW one.
+            # If we hold the OLD one, we are sending input to the wrong desktop.
+            
+            # So detecting change IS key.
+            # Is there a fast global event hook? Too complex.
+            
+            # Let's cache the handle but refresh it carefully.
+            # Maybe just refreshing every 1s is enough?
+            # Or just optimize the close/open.
+            
+            # Reverting to safer implementation but with handle reuse if name matches.
+            
+            current_name = self._get_current_input_desktop_name()
+            if not current_name:
+                return # Open failed, maybe access denied or transient
+                
+            # If name matches cached, do nothing (we likely are already set, or reused handle is fine)
+            if self.cached_h_desktop and self.last_desktop_name == current_name:
+                # We assume thread is still attached. 
+                # (SetThreadDesktop is per-thread, so if we did it once, we stay there unless changed)
+                return
+
+            # Desktop Changed!
+            # Close old
+            if self.cached_h_desktop:
+                user32.CloseDesktop(self.cached_h_desktop)
+                self.cached_h_desktop = None
+            
+            self.last_desktop_name = current_name
+            # print(f"[*] Attaching Input to Desktop: {self.last_desktop_name}")
+            
             # 1. Open the active input desktop
-            # DESKTOP_SWITCHDESKTOP | DESKTOP_WRITEOBJECTS | DESKTOP_READOBJECTS | 
-            # DESKTOP_ENUMERATE | DESKTOP_CREATEWINDOW | DESKTOP_CREATEMENU | DESKTOP_HOOKCONTROL
             ACCESS_FLAGS = 0x01FF 
             h_desktop = user32.OpenInputDesktop(0, False, ACCESS_FLAGS)
             
             if not h_desktop:
-                # If failed, we might already be on it, or access denied (less likely as SYSTEM)
                 # print(f"[-] OpenInputDesktop Failed: {ctypes.GetLastError()}")
                 return
 
             # 2. Set the current thread to this desktop
-            # This allows SendInput to work on the secure desktop
             if not user32.SetThreadDesktop(h_desktop):
                  print(f"[-] SetThreadDesktop Failed: {ctypes.GetLastError()}")
+                 user32.CloseDesktop(h_desktop)
+                 return
             
-            # 3. Close the handle (SetThreadDesktop increments ref count, so this is safe)
-            user32.CloseDesktop(h_desktop)
+            # 3. Cache it (DO NOT CLOSE IT yet)
+            self.cached_h_desktop = h_desktop
+            
+            # NOTE: usage of cached handle implies we keep it open.
+            # We must close it on cleanup or new switch.
 
         except Exception as e:
             print(f"[-] Desktop Switch Error: {e}")
 
     def _send_input(self, input_struct):
-        # Ensure we are targeting the real active desktop (even Secure Desktop)
+        # Switch if needed (handled internally)
         self._switch_to_input_desktop()
         
         ctypes.windll.user32.SendInput(

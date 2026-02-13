@@ -953,7 +953,7 @@ class AsyncAgent:
             self._shutdown_event = asyncio.Event()
             self._heartbeat_trigger = asyncio.Event()
 
-            self.send_queue = asyncio.Queue(maxsize=50000)
+            self.send_queue = asyncio.Queue(maxsize=10000)
             self._create_background_task(self.supervisor_watchdog())
             self._sender_task = self._create_background_task(self._sender_worker())
 
