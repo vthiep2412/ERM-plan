@@ -414,7 +414,7 @@ def start_agent_as_user():
             
         finally:
             # Prevent Token Leak
-            if primary_token:
+            if getattr(primary_token, "value", None):
                 windll.kernel32.CloseHandle(primary_token)
 
     except Exception:

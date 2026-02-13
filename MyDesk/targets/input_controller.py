@@ -40,6 +40,16 @@ class InputController:
             f"[+] InputController (Native SendInput): Screen {self.screen_width}x{self.screen_height}"
         )
 
+    def __del__(self):
+        """Cleanup any cached desktop handles to prevent leaks."""
+        if hasattr(self, "cached_h_desktop") and self.cached_h_desktop:
+            try:
+                # Close the handle using user32.CloseDesktop
+                ctypes.windll.user32.CloseDesktop(self.cached_h_desktop)
+            except Exception:
+                pass
+            self.cached_h_desktop = None
+
     def block_input(self, block: bool):
         """
         Block physical input devices using LowLevel Hooks.
@@ -99,45 +109,6 @@ class InputController:
         """
         try:
             user32 = ctypes.windll.user32
-            
-            # Simple heuristic: Check if desktop changed effectively
-            # Full GetUserObjectInformation check is heavy, so we rely on OpenInputDesktop success/fail as proxy?
-            # No, correct way is to check periodic or if SetThreadDesktop fails.
-            
-            # BETTER STRATEGY: 
-            # 1. Try to use cached handle.
-            # 2. If no cached handle, or if it failed recently, try OpenInputDesktop.
-            
-            # For now, let's refresh ONLY if we suspect a change or don't have one.
-            # Actually, to be robust against "Win+L" (Switch), we DO need to check status.
-            
-            # Optimization: 
-            # - If we have a cached handle, SetThreadDesktop(cached) is fast.
-            # - But if desktop CHANGED, SetThreadDesktop(old) might succeed but be wrong? 
-            # No, SetThreadDesktop to a non-active desktop works but input won't go to active.
-            
-            # Compromise: Check desktop name every N calls? Or simpler:
-            # Just try to open input desktop every time? NO that's what we want to avoid.
-            
-            # Logic: Input only works if we match the input desktop.
-            # Let's check name only if we haven't in a while?
-            # Or just assume stability until failure? MOUSE_MOVE is spammy.
-            
-            # NEW LOGIC:
-            # 1. Get Current Input Desktop Name (Fast? No, OpenInputDesktop is the slow part)
-            # Wait, OpenInputDesktop IS the syscall we want to avoid.
-            
-            # If we are SYSTEM, and user switches to Winlogon, OpenInputDesktop returns the NEW one.
-            # If we hold the OLD one, we are sending input to the wrong desktop.
-            
-            # So detecting change IS key.
-            # Is there a fast global event hook? Too complex.
-            
-            # Let's cache the handle but refresh it carefully.
-            # Maybe just refreshing every 1s is enough?
-            # Or just optimize the close/open.
-            
-            # Reverting to safer implementation but with handle reuse if name matches.
             
             current_name = self._get_current_input_desktop_name()
             if not current_name:

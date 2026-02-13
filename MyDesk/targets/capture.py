@@ -43,7 +43,7 @@ if cv2:
         pass
 
 TILE_SIZE = 32  # 32x32 pixel tiles
-from ctypes import windll, Structure, c_long, byref
+from ctypes import windll, Structure, c_long, byref, create_unicode_buffer, sizeof, c_wchar
 
 
 class POINT(Structure):
@@ -119,9 +119,8 @@ class DeltaScreenCapturer:
             user32.GetUserObjectInformationW(h_desktop, 2, None, 0, byref(length_needed))
             
             # Get name
-            from ctypes import create_unicode_buffer, sizeof, c_wchar
             # length_needed is in bytes, buffer expects chars
-            char_count = int(length_needed.value / sizeof(c_wchar)) + 1
+            char_count = (length_needed.value // sizeof(c_wchar)) + 1
             name_buf = create_unicode_buffer(char_count)
             user32.GetUserObjectInformationW(h_desktop, 2, name_buf, length_needed.value, byref(length_needed))
             return name_buf.value
@@ -291,6 +290,9 @@ class DeltaScreenCapturer:
             try:
                 # print("[*] Re-initializing MSS for new desktop...")
                 self.sct = mss.mss()
+                # Reset retry state on successful desktop switch re-init
+                self._sct_retry_count = 0
+                self._sct_last_retry = 0
             except Exception as e:
                 print(f"[-] MSS Re-init Failed: {e}")
                 self.sct = None # Ensure it remains None on failure
